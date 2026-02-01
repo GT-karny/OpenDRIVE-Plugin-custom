@@ -2,6 +2,7 @@
 #include "EditorModes.h"
 #include "EdMode.h"
 #include "../OpenDriveEditorLane.h"
+#include "OpenDriveLaneSpline.h"
 
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnLaneSelected, AOpenDriveEditorLane* road)
 
@@ -36,11 +37,16 @@ public :
 	 */
 	void ResetRoadsArray();
 
-	/**
+	/*
 	 * Generates roads.
 	 * It will call Reset() if there's already a generation done.
 	 */
 	void Generate();
+
+	/**
+	 * Generates lane splines (persistent actors).
+	 */
+	void GenerateLaneSplines();
 
 	/**
 	 * Sets the road offset 
@@ -75,6 +81,59 @@ public :
 	* @param bIsVisible True for visible, False for hidden
 	*/
 	void SetRoadsVisibilityInEditor(bool bIsVisible);
+	
+	// General filters
+	bool bGenerateRoads = true;
+	bool bGenerateJunctions = true;
+
+	void SetGenerateRoads(bool Val) { bGenerateRoads = Val; }
+	bool GetGenerateRoads() const { return bGenerateRoads; }
+
+	void SetGenerateJunctions(bool Val) { bGenerateJunctions = Val; }
+	bool GetGenerateJunctions() const { return bGenerateJunctions; }
+
+	// Lane generation flags
+	bool bGenerateDrivingLane = true;
+	bool bGenerateSidewalkLane = true;
+	bool bGenerateBikingLane = true;
+	bool bGenerateParkingLane = true;
+	bool bGenerateShoulderLane = true;
+	bool bGenerateRestrictedLane = true;
+	bool bGenerateMedianLane = true;
+	bool bGenerateOtherLane = true;
+
+	void SetGenerateDrivingLane(bool bGenerate) { bGenerateDrivingLane = bGenerate; }
+	bool GetGenerateDrivingLane() const { return bGenerateDrivingLane; }
+
+	void SetGenerateSidewalkLane(bool bGenerate) { bGenerateSidewalkLane = bGenerate; }
+	bool GetGenerateSidewalkLane() const { return bGenerateSidewalkLane; }
+
+	void SetGenerateBikingLane(bool bGenerate) { bGenerateBikingLane = bGenerate; }
+	bool GetGenerateBikingLane() const { return bGenerateBikingLane; }
+
+	void SetGenerateParkingLane(bool bGenerate) { bGenerateParkingLane = bGenerate; }
+	bool GetGenerateParkingLane() const { return bGenerateParkingLane; }
+	
+	void SetGenerateShoulderLane(bool bGenerate) { bGenerateShoulderLane = bGenerate; }
+	bool GetGenerateShoulderLane() const { return bGenerateShoulderLane; }
+
+	void SetGenerateRestrictedLane(bool bGenerate) { bGenerateRestrictedLane = bGenerate; }
+	bool GetGenerateRestrictedLane() const { return bGenerateRestrictedLane; }
+
+	void SetGenerateMedianLane(bool bGenerate) { bGenerateMedianLane = bGenerate; }
+	bool GetGenerateMedianLane() const { return bGenerateMedianLane; }
+
+	void SetGenerateOtherLane(bool bGenerate) { bGenerateOtherLane = bGenerate; }
+	bool GetGenerateOtherLane() const { return bGenerateOtherLane; }
+
+	bool bGenerateReferenceLane = true;
+	void SetGenerateReferenceLane(bool bGenerate) { bGenerateReferenceLane = bGenerate; }
+	bool GetGenerateReferenceLane() const { return bGenerateReferenceLane; }
+
+	bool bGenerateOutermostDrivingLaneOnly = false;
+	void SetGenerateOutermostDrivingLaneOnly(bool bGenerate) { bGenerateOutermostDrivingLaneOnly = bGenerate; }
+	bool GetGenerateOutermostDrivingLaneOnly() const { return bGenerateOutermostDrivingLaneOnly; }
+
 
 protected :
 
@@ -105,4 +164,14 @@ private :
 	* @param selectedObject The selected object 
 	*/
 	void OnActorSelected(UObject* _selectedObject);
+	
+public:
+	// Enum moved to AOpenDriveLaneSpline to allow Runtime access
+
+	void SetSplineGenerationMode(AOpenDriveLaneSpline::EOpenDriveLaneSplineMode NewMode) { SplineGenerationMode = NewMode; }
+	AOpenDriveLaneSpline::EOpenDriveLaneSplineMode GetSplineGenerationMode() const { return SplineGenerationMode; }
+
+private:
+	AOpenDriveLaneSpline::EOpenDriveLaneSplineMode SplineGenerationMode = AOpenDriveLaneSpline::Center;
 };
+

@@ -50,6 +50,11 @@ protected :
 	FReply Generate();
 
 	/**
+	* Link the GenerateLaneSplines() function in the OpenDRIVEEditorMode.cpp file
+	*/
+	FReply GenerateLaneSplines();
+
+	/**
 	* Link the Reset() function in the OpenDRIVEEditorMode.cpp file
 	*/
 	FReply Reset();
@@ -83,6 +88,31 @@ protected :
 	* @param value The new value
 	*/
 	void OnOffsetValueChanged(float value);
+	
+	/**
+	* Called when lane type checkboxes state is changed
+	*/
+	void OnDrivingLaneCheckStateChanged(ECheckBoxState state);
+	void OnSidewalkLaneCheckStateChanged(ECheckBoxState state);
+
+	void OnGenerateRoadsCheckStateChanged(ECheckBoxState state);
+	void OnGenerateJunctionsCheckStateChanged(ECheckBoxState state);
+
+	// Other lane types
+	void OnBikingLaneCheckStateChanged(ECheckBoxState state);
+	void OnParkingLaneCheckStateChanged(ECheckBoxState state);
+	void OnShoulderLaneCheckStateChanged(ECheckBoxState state);
+	void OnRestrictedLaneCheckStateChanged(ECheckBoxState state);
+	void OnMedianLaneCheckStateChanged(ECheckBoxState state);
+	void OnOtherLaneCheckStateChanged(ECheckBoxState state);
+	void OnReferenceLaneCheckStateChanged(ECheckBoxState state);
+	void OnGenerateOutermostDrivingLaneOnlyCheckStateChanged(ECheckBoxState state);
+
+	/**
+	* Called when spline generation mode is changed
+	*/
+	void OnSplineResampleModeChanged(TSharedPtr<FString> NewValue, ESelectInfo::Type Type);
+	TSharedRef<SWidget> MakeSplineResampleModeWidget(TSharedPtr<FString> InOption);
 
 	/**
 	* Called when the step value is changed with the slider
@@ -97,6 +127,11 @@ private :
 
 	//Tickbox 
 	TSharedPtr<SCheckBox> _showArrowsCheckBox;
+
+	// Spline Generation Mode
+	TSharedPtr<SComboBox<TSharedPtr<FString>>> _splineGenModeComboBox;
+	TArray<TSharedPtr<FString>> _splineGenModeOptions;
+	TSharedPtr<STextBlock> _splineGenModeText;
 
 	//Slider bars's texts 
 	TSharedPtr<STextBlock> _stepTextPtr;
