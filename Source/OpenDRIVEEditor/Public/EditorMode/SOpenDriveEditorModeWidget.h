@@ -101,6 +101,11 @@ protected :
 	void OnMedianLaneCheckStateChanged(ECheckBoxState state);
 	void OnOtherLaneCheckStateChanged(ECheckBoxState state);
 
+	/**
+	* Called when spline generation mode is changed
+	*/
+	void OnSplineResampleModeChanged(TSharedPtr<FString> NewValue, ESelectInfo::Type Type);
+	TSharedRef<SWidget> MakeSplineResampleModeWidget(TSharedPtr<FString> InOption);
 
 	/**
 	* Called when the step value is changed with the slider
@@ -115,6 +120,11 @@ private :
 
 	//Tickbox 
 	TSharedPtr<SCheckBox> _showArrowsCheckBox;
+
+	// Spline Generation Mode
+	TSharedPtr<SComboBox<TSharedPtr<FString>>> _splineGenModeComboBox;
+	TArray<TSharedPtr<FString>> _splineGenModeOptions;
+	TSharedPtr<STextBlock> _splineGenModeText;
 
 	//Slider bars's texts 
 	TSharedPtr<STextBlock> _stepTextPtr;

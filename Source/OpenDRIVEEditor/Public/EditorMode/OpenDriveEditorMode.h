@@ -2,6 +2,7 @@
 #include "EditorModes.h"
 #include "EdMode.h"
 #include "../OpenDriveEditorLane.h"
+#include "OpenDriveLaneSpline.h"
 
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnLaneSelected, AOpenDriveEditorLane* road)
 
@@ -145,4 +146,14 @@ private :
 	* @param selectedObject The selected object 
 	*/
 	void OnActorSelected(UObject* _selectedObject);
+	
+public:
+	// Enum moved to AOpenDriveLaneSpline to allow Runtime access
+
+	void SetSplineGenerationMode(AOpenDriveLaneSpline::EOpenDriveLaneSplineMode NewMode) { SplineGenerationMode = NewMode; }
+	AOpenDriveLaneSpline::EOpenDriveLaneSplineMode GetSplineGenerationMode() const { return SplineGenerationMode; }
+
+private:
+	AOpenDriveLaneSpline::EOpenDriveLaneSplineMode SplineGenerationMode = AOpenDriveLaneSpline::Center;
 };
+
