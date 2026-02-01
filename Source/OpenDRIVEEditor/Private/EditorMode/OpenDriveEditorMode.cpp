@@ -164,6 +164,13 @@ void FOpenDRIVEEditorMode::GenerateLaneSplines()
 
 			if (!laneSection) continue;
 
+			// Check filtering for Roads vs Junctions
+			int32 JunctionId = road->GetJunction();
+			bool bIsJunction = (JunctionId != -1);
+
+			if (bIsJunction && !bGenerateJunctions) continue;
+			if (!bIsJunction && !bGenerateRoads) continue;
+
 			for (int k = 0; k < laneSection->GetNumberOfLanes(); k++)
 			{
 				lane = laneSection->GetLaneByIdx(k);
@@ -172,44 +179,42 @@ void FOpenDRIVEEditorMode::GenerateLaneSplines()
 				// Note: We include ID 0 (center lane) as per requirement
 
 				bool bShouldGenerate = false;
-				switch (lane->GetLaneType())
+				if (lane->GetId() == 0)
 				{
-				case roadmanager::Lane::LaneType::LANE_TYPE_DRIVING:
-					bShouldGenerate = bGenerateDrivingLane;
-					break;
-				case roadmanager::Lane::LaneType::LANE_TYPE_SIDEWALK:
-					bShouldGenerate = bGenerateSidewalkLane;
-					break;
-				case roadmanager::Lane::LaneType::LANE_TYPE_BIKING:
-					bShouldGenerate = bGenerateBikingLane;
-					break;
-				case roadmanager::Lane::LaneType::LANE_TYPE_PARKING:
-					bShouldGenerate = bGenerateParkingLane;
-					break;
-				case roadmanager::Lane::LaneType::LANE_TYPE_SHOULDER:
-					bShouldGenerate = bGenerateShoulderLane;
-					break;
-				case roadmanager::Lane::LaneType::LANE_TYPE_RESTRICTED:
-					bShouldGenerate = bGenerateRestrictedLane;
-					break;
-				case roadmanager::Lane::LaneType::LANE_TYPE_MEDIAN:
-					bShouldGenerate = bGenerateMedianLane;
-					break;
-				default:
-					bShouldGenerate = bGenerateOtherLane;
-					break;
+					bShouldGenerate = bGenerateReferenceLane;
+				}
+				else
+				{
+					switch (lane->GetLaneType())
+					{
+					case roadmanager::Lane::LaneType::LANE_TYPE_DRIVING:
+						bShouldGenerate = bGenerateDrivingLane;
+						break;
+					case roadmanager::Lane::LaneType::LANE_TYPE_SIDEWALK:
+						bShouldGenerate = bGenerateSidewalkLane;
+						break;
+					case roadmanager::Lane::LaneType::LANE_TYPE_BIKING:
+						bShouldGenerate = bGenerateBikingLane;
+						break;
+					case roadmanager::Lane::LaneType::LANE_TYPE_PARKING:
+						bShouldGenerate = bGenerateParkingLane;
+						break;
+					case roadmanager::Lane::LaneType::LANE_TYPE_SHOULDER:
+						bShouldGenerate = bGenerateShoulderLane;
+						break;
+					case roadmanager::Lane::LaneType::LANE_TYPE_RESTRICTED:
+						bShouldGenerate = bGenerateRestrictedLane;
+						break;
+					case roadmanager::Lane::LaneType::LANE_TYPE_MEDIAN:
+						bShouldGenerate = bGenerateMedianLane;
+						break;
+					default:
+						bShouldGenerate = bGenerateOtherLane;
+						break;
+					}
 				}
 
-				if (!bShouldGenerate && lane->GetId() != 0) continue; // Always generate lane 0? No, lane 0 is usually 'None' or 'Mediam', let's stick to flags unless it's special. 
-				// Wait, Lane 0 is usually "None" type in OpenDrive but used for reference.
-				// If Lane 0 type is None, it falls to 'Other'.
-				// Let's ensure Lane 0 is generated if we want reference lines, or maybe consistent with 'Other' or 'Median'.
-				// For now, let's respect the switch. Lane 0 usually has type NONE.
-				
-				// Re-evaluating: Lane 0 is critical for reference. If it's type NONE, it might be filtered out if 'Other' is unchecked.
-				// The user asked for "Reference Line" tag on Lane 0. Identifying Lane 0 is by ID.
-				// Let's allow Lane 0 if 'Other' is checked OR if we decide it's a "Reference Line" (maybe separate toggle? No, simplicity).
-				// Let's just follow the flags for now. If Lane 0 is type NONE, it is controlled by 'Other'.
+				if (!bShouldGenerate) continue; 
 
 
 				AOpenDriveLaneSpline* newSpline = GetWorld()->SpawnActor<AOpenDriveLaneSpline>(FVector::ZeroVector, FRotator::ZeroRotator, spawnParam);

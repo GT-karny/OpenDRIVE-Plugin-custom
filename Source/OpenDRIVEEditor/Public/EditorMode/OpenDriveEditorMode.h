@@ -82,6 +82,16 @@ public :
 	*/
 	void SetRoadsVisibilityInEditor(bool bIsVisible);
 	
+	// General filters
+	bool bGenerateRoads = true;
+	bool bGenerateJunctions = true;
+
+	void SetGenerateRoads(bool Val) { bGenerateRoads = Val; }
+	bool GetGenerateRoads() const { return bGenerateRoads; }
+
+	void SetGenerateJunctions(bool Val) { bGenerateJunctions = Val; }
+	bool GetGenerateJunctions() const { return bGenerateJunctions; }
+
 	// Lane generation flags
 	bool bGenerateDrivingLane = true;
 	bool bGenerateSidewalkLane = true;
@@ -115,6 +125,10 @@ public :
 
 	void SetGenerateOtherLane(bool bGenerate) { bGenerateOtherLane = bGenerate; }
 	bool GetGenerateOtherLane() const { return bGenerateOtherLane; }
+
+	bool bGenerateReferenceLane = true;
+	void SetGenerateReferenceLane(bool bGenerate) { bGenerateReferenceLane = bGenerate; }
+	bool GetGenerateReferenceLane() const { return bGenerateReferenceLane; }
 
 
 protected :

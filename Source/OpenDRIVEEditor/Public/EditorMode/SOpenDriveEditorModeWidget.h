@@ -94,12 +94,18 @@ protected :
 	*/
 	void OnDrivingLaneCheckStateChanged(ECheckBoxState state);
 	void OnSidewalkLaneCheckStateChanged(ECheckBoxState state);
+
+	void OnGenerateRoadsCheckStateChanged(ECheckBoxState state);
+	void OnGenerateJunctionsCheckStateChanged(ECheckBoxState state);
+
+	// Other lane types
 	void OnBikingLaneCheckStateChanged(ECheckBoxState state);
 	void OnParkingLaneCheckStateChanged(ECheckBoxState state);
 	void OnShoulderLaneCheckStateChanged(ECheckBoxState state);
 	void OnRestrictedLaneCheckStateChanged(ECheckBoxState state);
 	void OnMedianLaneCheckStateChanged(ECheckBoxState state);
 	void OnOtherLaneCheckStateChanged(ECheckBoxState state);
+	void OnReferenceLaneCheckStateChanged(ECheckBoxState state);
 
 	/**
 	* Called when spline generation mode is changed
