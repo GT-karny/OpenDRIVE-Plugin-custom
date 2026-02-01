@@ -36,11 +36,16 @@ public :
 	 */
 	void ResetRoadsArray();
 
-	/**
+	/*
 	 * Generates roads.
 	 * It will call Reset() if there's already a generation done.
 	 */
 	void Generate();
+
+	/**
+	 * Generates lane splines (persistent actors).
+	 */
+	void GenerateLaneSplines();
 
 	/**
 	 * Sets the road offset 
