@@ -56,11 +56,36 @@ void AOpenDriveLaneSpline::Initialize(roadmanager::Road* road, roadmanager::Lane
 		break;
 	}
 	
+	/*
 	SplineComponent->ComponentTags.Add(FName(*LaneType));
 
 	if (LaneId == 0)
 	{
 		SplineComponent->ComponentTags.Add(FName("Reference Line"));
+	}
+	*/
+
+	FString ModeString;
+	switch (mode)
+	{
+	case Inside:
+		ModeString = "Inside";
+		break;
+	case Outside:
+		ModeString = "Outside";
+		break;
+	case Center:
+	default:
+		ModeString = "Center";
+		break;
+	}
+
+	FString NewTag = FString::Printf(TEXT("%s:%s"), *LaneType, *ModeString);
+	Tags.Add(FName(*NewTag));
+
+	if (LaneId == 0)
+	{
+		Tags.Add(FName("Reference line"));
 	}
 
 
