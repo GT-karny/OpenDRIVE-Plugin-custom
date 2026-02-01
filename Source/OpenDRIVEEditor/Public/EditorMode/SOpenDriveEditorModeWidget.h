@@ -50,6 +50,11 @@ protected :
 	FReply Generate();
 
 	/**
+	* Link the GenerateLaneSplines() function in the OpenDRIVEEditorMode.cpp file
+	*/
+	FReply GenerateLaneSplines();
+
+	/**
 	* Link the Reset() function in the OpenDRIVEEditorMode.cpp file
 	*/
 	FReply Reset();

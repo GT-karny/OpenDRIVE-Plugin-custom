@@ -129,27 +129,47 @@ TSharedRef<SBorder> SOpenDRIVEEditorModeWidget::ConstructLaneInfoBox(const FArgu
 
 TSharedRef<SHorizontalBox> SOpenDRIVEEditorModeWidget::ConstructButtons(const FArguments& InArgs)
 {
+	// Reset Button
 	TSharedPtr<SButton> resetButton = SNew(SButton).Text(FText::FromString("Reset"))
 		.OnClicked(this, &SOpenDRIVEEditorModeWidget::Reset).IsEnabled(this, &SOpenDRIVEEditorModeWidget::IsLoaded)
 		.ToolTipText(FText::FromString(TEXT("Resets currently drawn roads.")));
 
 	StaticCast<STextBlock&>(resetButton.ToSharedRef().Get().GetContent().Get()).SetJustification(ETextJustify::Center);
 
+	// Generate Button
 	TSharedPtr<SButton> generateButton = SNew(SButton).Text(FText::FromString("Generate"))
 		.OnClicked(this, &SOpenDRIVEEditorModeWidget::Generate).IsEnabled(this, &SOpenDRIVEEditorModeWidget::CheckIfInEditorMode)
 		.ToolTipText(FText::FromString(TEXT("Draws roads (will reset currently drawn roads).")));
 
 	StaticCast<STextBlock&>(generateButton.ToSharedRef().Get().GetContent().Get()).SetJustification(ETextJustify::Center);
 
+	// Generate Splines Button
+	TSharedPtr<SButton> generateSplinesButton = SNew(SButton).Text(FText::FromString("Gen Splines"))
+		.OnClicked(this, &SOpenDRIVEEditorModeWidget::GenerateLaneSplines).IsEnabled(this, &SOpenDRIVEEditorModeWidget::CheckIfInEditorMode)
+		.ToolTipText(FText::FromString(TEXT("Generates persistent spline actors for all lanes.")));
+
+	StaticCast<STextBlock&>(generateSplinesButton.ToSharedRef().Get().GetContent().Get()).SetJustification(ETextJustify::Center);
+
+	/* 
+	 * Layout Strategy:
+	 * Since the return type signature is TSharedRef<SHorizontalBox>, we MUST return a HorizontalBox.
+	 * We can either put all buttons in one row, or put a VerticalBox inside the HorizontalBox.
+	 * Let's try putting all 3 buttons in one row for simplicity and to match the signature.
+	 */
+
 	TSharedRef<SHorizontalBox> horBox = 
 		SNew(SHorizontalBox)
-		+ SHorizontalBox::Slot().Padding(20, 0, 0, 0).FillWidth(0.5f)
+		+ SHorizontalBox::Slot().Padding(20, 0, 0, 0).FillWidth(0.33f)
 		[
 			resetButton.ToSharedRef()
 		]
-		+ SHorizontalBox::Slot().Padding(10, 0, 20, 0).FillWidth(0.5f)
+		+ SHorizontalBox::Slot().Padding(10, 0, 0, 0).FillWidth(0.33f)
 		[
 			generateButton.ToSharedRef()
+		]
+		+ SHorizontalBox::Slot().Padding(10, 0, 20, 0).FillWidth(0.33f)
+		[
+			generateSplinesButton.ToSharedRef()
 		];
 
 	return horBox;
@@ -297,4 +317,10 @@ void SOpenDRIVEEditorModeWidget::OnStepValueChanged(float value)
 {
 	_stepTextPtr->SetText(FText::FromString("Step : " + FString::FormatAsNumber(value)));
 	GetEdMode()->SetStep(value);
+}
+
+FReply SOpenDRIVEEditorModeWidget::GenerateLaneSplines()
+{
+	GetEdMode()->GenerateLaneSplines();
+	return FReply::Handled();
 }

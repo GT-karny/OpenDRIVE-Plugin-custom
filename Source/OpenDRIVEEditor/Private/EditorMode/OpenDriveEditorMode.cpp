@@ -1,4 +1,5 @@
 #include "Public/EditorMode/OpenDriveEditorMode.h"
+#include "OpenDriveLaneSpline.h"
 #include "Public/OpenDriveEditor.h"
 #include "Toolkits/ToolkitManager.h"
 #include "ScopedTransaction.h"
@@ -136,6 +137,48 @@ void FOpenDRIVEEditorMode::LoadRoadsNetwork()
 		}
 	}
 	bHasBeenLoaded = true;
+}
+
+void FOpenDRIVEEditorMode::GenerateLaneSplines()
+{
+	// roadmanager params
+	roadmanager::OpenDrive* Odr = roadmanager::Position::GetOpenDrive();
+	roadmanager::Road* road = 0;
+	roadmanager::LaneSection* laneSection = 0;
+	roadmanager::Lane* lane = 0;
+	size_t nrOfRoads = Odr->GetNumOfRoads();
+
+	// Actor spawn params
+	FActorSpawnParameters spawnParam;
+	spawnParam.bHideFromSceneOutliner = false; // Persistent actors should be visible
+	spawnParam.bTemporaryEditorActor = false; // Persistent
+
+	for (int i = 0; i < (int)nrOfRoads; i++)
+	{
+		road = Odr->GetRoadByIdx(i);
+		if (!road) continue;
+
+		for (int j = 0; j < road->GetNumberOfLaneSections(); j++)
+		{
+			laneSection = road->GetLaneSectionByIdx(j);
+
+			if (!laneSection) continue;
+
+			for (int k = 0; k < laneSection->GetNumberOfLanes(); k++)
+			{
+				lane = laneSection->GetLaneByIdx(k);
+
+				if (!lane) continue; 
+				// Note: We include ID 0 (center lane) as per requirement
+
+				AOpenDriveLaneSpline* newSpline = GetWorld()->SpawnActor<AOpenDriveLaneSpline>(FVector::ZeroVector, FRotator::ZeroRotator, spawnParam);
+				newSpline->Initialize(road, laneSection, lane, _roadOffset, _step);
+#if WITH_EDITOR
+				newSpline->SetActorLabel(FString::Printf(TEXT("LaneSpline_Road%d_Lane%d"), road->GetId(), lane->GetId()));
+#endif
+			}
+		}
+	}
 }
 
 void FOpenDRIVEEditorMode::SetRoadsVisibilityInEditor(bool bIsVisible)
