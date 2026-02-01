@@ -202,6 +202,39 @@ TSharedRef<SBorder> SOpenDRIVEEditorModeWidget::ConstructRoadGenerationParameter
 	TSharedRef<SBorder> border = SNew(SBorder)
 		[
 			SNew(SVerticalBox)
+			// Lane Filters
+			+ SVerticalBox::Slot().AutoHeight().Padding(5.f, 5.f, 0.f, 0.f)
+			[
+				SNew(STextBlock).Text(FText::FromString("Lane Generation Filters")).Font(*_fontInfoPtr).Justification(ETextJustify::Center)
+			]
+			+ SVerticalBox::Slot().AutoHeight().Padding(5.f, 2.f, 0.f, 0.f)
+			[
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot().AutoWidth().Padding(5) [ SNew(SCheckBox).IsChecked(ECheckBoxState::Checked).OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnDrivingLaneCheckStateChanged) .Content()[ SNew(STextBlock).Text(FText::FromString("Driving")) ] ]
+				+ SHorizontalBox::Slot().AutoWidth().Padding(5) [ SNew(SCheckBox).IsChecked(ECheckBoxState::Checked).OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnSidewalkLaneCheckStateChanged) .Content()[ SNew(STextBlock).Text(FText::FromString("Sidewalk")) ] ]
+			]
+			+ SVerticalBox::Slot().AutoHeight().Padding(5.f, 2.f, 0.f, 0.f)
+			[
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot().AutoWidth().Padding(5) [ SNew(SCheckBox).IsChecked(ECheckBoxState::Checked).OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnBikingLaneCheckStateChanged) .Content()[ SNew(STextBlock).Text(FText::FromString("Biking")) ] ]
+				+ SHorizontalBox::Slot().AutoWidth().Padding(5) [ SNew(SCheckBox).IsChecked(ECheckBoxState::Checked).OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnParkingLaneCheckStateChanged) .Content()[ SNew(STextBlock).Text(FText::FromString("Parking")) ] ]
+			]
+			+ SVerticalBox::Slot().AutoHeight().Padding(5.f, 2.f, 0.f, 0.f)
+			[
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot().AutoWidth().Padding(5) [ SNew(SCheckBox).IsChecked(ECheckBoxState::Checked).OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnShoulderLaneCheckStateChanged) .Content()[ SNew(STextBlock).Text(FText::FromString("Shoulder")) ] ]
+				+ SHorizontalBox::Slot().AutoWidth().Padding(5) [ SNew(SCheckBox).IsChecked(ECheckBoxState::Checked).OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnRestrictedLaneCheckStateChanged) .Content()[ SNew(STextBlock).Text(FText::FromString("Restricted")) ] ]
+			]
+			+ SVerticalBox::Slot().AutoHeight().Padding(5.f, 2.f, 0.f, 0.f)
+			[
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot().AutoWidth().Padding(5) [ SNew(SCheckBox).IsChecked(ECheckBoxState::Checked).OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnMedianLaneCheckStateChanged) .Content()[ SNew(STextBlock).Text(FText::FromString("Median")) ] ]
+				+ SHorizontalBox::Slot().AutoWidth().Padding(5) [ SNew(SCheckBox).IsChecked(ECheckBoxState::Checked).OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnOtherLaneCheckStateChanged) .Content()[ SNew(STextBlock).Text(FText::FromString("Other")) ] ]
+			]
+			+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 10.f, 0.f, 0.f).HAlign(HAlign_Center) [ SNew(SSeparator) ]
+
+
+
 			+ SVerticalBox::Slot()
 			.AutoHeight()
 			.Padding(5.f, 10.f, 0.f, 0.f)
@@ -324,3 +357,44 @@ FReply SOpenDRIVEEditorModeWidget::GenerateLaneSplines()
 	GetEdMode()->GenerateLaneSplines();
 	return FReply::Handled();
 }
+
+void SOpenDRIVEEditorModeWidget::OnDrivingLaneCheckStateChanged(ECheckBoxState state)
+{
+	GetEdMode()->SetGenerateDrivingLane(state == ECheckBoxState::Checked);
+}
+
+void SOpenDRIVEEditorModeWidget::OnSidewalkLaneCheckStateChanged(ECheckBoxState state)
+{
+	GetEdMode()->SetGenerateSidewalkLane(state == ECheckBoxState::Checked);
+}
+
+void SOpenDRIVEEditorModeWidget::OnBikingLaneCheckStateChanged(ECheckBoxState state)
+{
+	GetEdMode()->SetGenerateBikingLane(state == ECheckBoxState::Checked);
+}
+
+void SOpenDRIVEEditorModeWidget::OnParkingLaneCheckStateChanged(ECheckBoxState state)
+{
+	GetEdMode()->SetGenerateParkingLane(state == ECheckBoxState::Checked);
+}
+
+void SOpenDRIVEEditorModeWidget::OnShoulderLaneCheckStateChanged(ECheckBoxState state)
+{
+	GetEdMode()->SetGenerateShoulderLane(state == ECheckBoxState::Checked);
+}
+
+void SOpenDRIVEEditorModeWidget::OnRestrictedLaneCheckStateChanged(ECheckBoxState state)
+{
+	GetEdMode()->SetGenerateRestrictedLane(state == ECheckBoxState::Checked);
+}
+
+void SOpenDRIVEEditorModeWidget::OnMedianLaneCheckStateChanged(ECheckBoxState state)
+{
+	GetEdMode()->SetGenerateMedianLane(state == ECheckBoxState::Checked);
+}
+
+void SOpenDRIVEEditorModeWidget::OnOtherLaneCheckStateChanged(ECheckBoxState state)
+{
+	GetEdMode()->SetGenerateOtherLane(state == ECheckBoxState::Checked);
+}
+
