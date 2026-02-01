@@ -100,24 +100,48 @@ void AOpenDriveLaneSpline::Initialize(roadmanager::Road* road, roadmanager::Lane
 	position.Init();
 	position.SetSnapLaneTypes(roadmanager::Lane::LANE_TYPE_ANY);
 
-	SetLanePoint(position, s, offset, mode);
-
-	// Had a lane spline point every step meters
-	s += step;
-	for (s; s < _laneSection->GetS() + laneLength; s += step)
+	if (LaneId > 0) // Left Lane: Reverse Direction (Against Reference Line)
 	{
-		SetLanePoint(position, s, offset, mode);
-	}
+		double currentS = _laneSection->GetS() + laneLength;
 
-	// Final point
-	SetLanePoint(position, _laneSection->GetS() + laneLength, offset, mode);
+		// 1. Add End Point (as Start of Spline)
+		SetLanePoint(position, currentS, offset, mode, true);
+
+		// 2. Add Middle Points
+		currentS -= step;
+		for (; currentS > _laneSection->GetS(); currentS -= step)
+		{
+			SetLanePoint(position, currentS, offset, mode, true);
+		}
+
+		// 3. Add Start Point (as End of Spline)
+		SetLanePoint(position, _laneSection->GetS(), offset, mode, true);
+	}
+	else // Right Lane or Center: Standard Direction (With Reference Line)
+	{
+		double currentS = _laneSection->GetS();
+
+		// 1. Add Start Point
+		SetLanePoint(position, currentS, offset, mode, false);
+
+		// 2. Add Middle Points
+		currentS += step;
+		for (; currentS < _laneSection->GetS() + laneLength; currentS += step)
+		{
+			SetLanePoint(position, currentS, offset, mode, false);
+		}
+
+		// 3. Add End Point
+		SetLanePoint(position, _laneSection->GetS() + laneLength, offset, mode, false);
+	}
+	
 	if (laneLength > step)
 	{
 		CheckLastTwoPointsDistance(step);
 	}
 }
 
-void AOpenDriveLaneSpline::SetLanePoint(roadmanager::Position& position, double s, float offset, EOpenDriveLaneSplineMode mode)
+void AOpenDriveLaneSpline::SetLanePoint(roadmanager::Position& position, double s, float offset, EOpenDriveLaneSplineMode mode, bool bReverseRotation)
 {
 	double t = 0.;
 	if (mode != Center)
@@ -163,6 +187,12 @@ void AOpenDriveLaneSpline::SetLanePoint(roadmanager::Position& position, double 
 	SplineComponent->AddSplineWorldPoint(sp);
 	
 	FRotator rot = CoordTranslate::OdrToUe::ToRotation(position);
+	if (bReverseRotation)
+	{
+		rot.Yaw += 180.0f;
+		rot.Normalize();
+	}
+
 	SplineComponent->SetRotationAtSplinePoint(SplineComponent->GetNumberOfSplinePoints() - 1, rot, ESplineCoordinateSpace::World);
 
 	// No scaling set as we are not using spline meshes for visualization in this actor

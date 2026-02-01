@@ -58,8 +58,9 @@ private:
 	* @param ds Distance to move along lane
 	 * @param offset The road offset
 	 * @param mode The spline generation mode
+	 * @param bReverseRotation Whether to reverse the rotation (yaw + 180)
 	 */
-	void SetLanePoint(roadmanager::Position& position, double s, float offset, EOpenDriveLaneSplineMode mode);
+	void SetLanePoint(roadmanager::Position& position, double s, float offset, EOpenDriveLaneSplineMode mode, bool bReverseRotation = false);
 
 	/**
 	* Checks the distance between the last spline point and his predecessor : if the distance is too short, we remove its predecessor.
