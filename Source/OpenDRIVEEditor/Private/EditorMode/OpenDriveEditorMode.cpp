@@ -213,7 +213,7 @@ void FOpenDRIVEEditorMode::GenerateLaneSplines()
 
 
 				AOpenDriveLaneSpline* newSpline = GetWorld()->SpawnActor<AOpenDriveLaneSpline>(FVector::ZeroVector, FRotator::ZeroRotator, spawnParam);
-				newSpline->Initialize(road, laneSection, lane, _roadOffset, _step);
+				newSpline->Initialize(road, laneSection, lane, _roadOffset, _step, GetSplineGenerationMode());
 #if WITH_EDITOR
 				newSpline->SetActorLabel(FString::Printf(TEXT("LaneSpline_Road%d_Lane%d"), road->GetId(), lane->GetId()));
 #endif

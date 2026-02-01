@@ -199,6 +199,33 @@ TSharedRef<SBorder> SOpenDRIVEEditorModeWidget::ConstructRoadGenerationParameter
 		.IsEnabled(this, &SOpenDRIVEEditorModeWidget::CheckIfInEditorMode)
 		.OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnCheckStateChanged);
 
+	_splineGenModeOptions.Add(MakeShareable(new FString("Center")));
+	_splineGenModeOptions.Add(MakeShareable(new FString("Inside")));
+	_splineGenModeOptions.Add(MakeShareable(new FString("Outside")));
+
+	_splineGenModeComboBox = SNew(SComboBox<TSharedPtr<FString>>)
+		.OptionsSource(&_splineGenModeOptions)
+		.OnGenerateWidget(this, &SOpenDRIVEEditorModeWidget::MakeSplineResampleModeWidget)
+		.OnSelectionChanged(this, &SOpenDRIVEEditorModeWidget::OnSplineResampleModeChanged)
+		[
+			SNew(STextBlock).Text_Lambda([this]()
+			{
+				if (_splineGenModeComboBox.IsValid() && _splineGenModeComboBox->GetSelectedItem().IsValid())
+				{
+					return FText::FromString(*_splineGenModeComboBox->GetSelectedItem());
+				}
+				return FText::FromString("Center");
+			})
+			.Font(*_fontInfoPtr)
+		];
+	
+	// Set initial selection based on mode
+	AOpenDriveLaneSpline::EOpenDriveLaneSplineMode CurrentMode = GetEdMode()->GetSplineGenerationMode();
+	if (_splineGenModeOptions.IsValidIndex((int)CurrentMode))
+	{
+		_splineGenModeComboBox->SetSelectedItem(_splineGenModeOptions[(int)CurrentMode]);
+	}
+
 	TSharedRef<SBorder> border = SNew(SBorder)
 		[
 			SNew(SVerticalBox)
@@ -230,6 +257,17 @@ TSharedRef<SBorder> SOpenDRIVEEditorModeWidget::ConstructRoadGenerationParameter
 				SNew(SHorizontalBox)
 				+ SHorizontalBox::Slot().AutoWidth().Padding(5) [ SNew(SCheckBox).IsChecked(ECheckBoxState::Checked).OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnMedianLaneCheckStateChanged) .Content()[ SNew(STextBlock).Text(FText::FromString("Median")) ] ]
 				+ SHorizontalBox::Slot().AutoWidth().Padding(5) [ SNew(SCheckBox).IsChecked(ECheckBoxState::Checked).OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnOtherLaneCheckStateChanged) .Content()[ SNew(STextBlock).Text(FText::FromString("Other")) ] ]
+			]
+			+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 10.f, 0.f, 0.f).HAlign(HAlign_Center) [ SNew(SSeparator) ]
+
+			// Spline Generation Mode
+			+ SVerticalBox::Slot().AutoHeight().Padding(5.f, 10.f, 0.f, 0.f)
+			[
+				SNew(STextBlock).Text(FText::FromString("Spline Generation Reference")).Font(*_fontInfoPtr).Justification(ETextJustify::Center)
+			]
+			+ SVerticalBox::Slot().AutoHeight().Padding(5.f, 5.f, 0.f, 0.f).HAlign(HAlign_Center)
+			[
+				_splineGenModeComboBox.ToSharedRef()
 			]
 			+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 10.f, 0.f, 0.f).HAlign(HAlign_Center) [ SNew(SSeparator) ]
 
@@ -396,5 +434,28 @@ void SOpenDRIVEEditorModeWidget::OnMedianLaneCheckStateChanged(ECheckBoxState st
 void SOpenDRIVEEditorModeWidget::OnOtherLaneCheckStateChanged(ECheckBoxState state)
 {
 	GetEdMode()->SetGenerateOtherLane(state == ECheckBoxState::Checked);
+}
+
+TSharedRef<SWidget> SOpenDRIVEEditorModeWidget::MakeSplineResampleModeWidget(TSharedPtr<FString> InOption)
+{
+	return SNew(STextBlock).Text(FText::FromString(*InOption)).Font(*_fontInfoPtr);
+}
+
+void SOpenDRIVEEditorModeWidget::OnSplineResampleModeChanged(TSharedPtr<FString> NewValue, ESelectInfo::Type Type)
+{
+	if (!NewValue.IsValid()) return;
+
+	if (*NewValue == "Center")
+	{
+		GetEdMode()->SetSplineGenerationMode(AOpenDriveLaneSpline::Center);
+	}
+	else if (*NewValue == "Inside")
+	{
+		GetEdMode()->SetSplineGenerationMode(AOpenDriveLaneSpline::Inside);
+	}
+	else if (*NewValue == "Outside")
+	{
+		GetEdMode()->SetSplineGenerationMode(AOpenDriveLaneSpline::Outside);
+	}
 }
 
