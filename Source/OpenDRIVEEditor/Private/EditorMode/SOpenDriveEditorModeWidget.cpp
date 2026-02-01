@@ -229,6 +229,18 @@ TSharedRef<SBorder> SOpenDRIVEEditorModeWidget::ConstructRoadGenerationParameter
 	TSharedRef<SBorder> border = SNew(SBorder)
 		[
 			SNew(SVerticalBox)
+			// General Generation Filters
+			+ SVerticalBox::Slot().AutoHeight().Padding(5.f, 5.f, 0.f, 0.f)
+			[
+				SNew(STextBlock).Text(FText::FromString("General Generation Filters")).Font(*_fontInfoPtr).Justification(ETextJustify::Center)
+			]
+			+ SVerticalBox::Slot().AutoHeight().Padding(5.f, 2.f, 0.f, 0.f)
+			[
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot().AutoWidth().Padding(5) [ SNew(SCheckBox).IsChecked(ECheckBoxState::Checked).OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnGenerateRoadsCheckStateChanged) .Content()[ SNew(STextBlock).Text(FText::FromString("Generate Roads")) ] ]
+				+ SHorizontalBox::Slot().AutoWidth().Padding(5) [ SNew(SCheckBox).IsChecked(ECheckBoxState::Checked).OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnGenerateJunctionsCheckStateChanged) .Content()[ SNew(STextBlock).Text(FText::FromString("Generate Junctions")) ] ]
+			]
+			+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 10.f, 0.f, 0.f).HAlign(HAlign_Center) [ SNew(SSeparator) ]
 			// Lane Filters
 			+ SVerticalBox::Slot().AutoHeight().Padding(5.f, 5.f, 0.f, 0.f)
 			[
@@ -257,6 +269,11 @@ TSharedRef<SBorder> SOpenDRIVEEditorModeWidget::ConstructRoadGenerationParameter
 				SNew(SHorizontalBox)
 				+ SHorizontalBox::Slot().AutoWidth().Padding(5) [ SNew(SCheckBox).IsChecked(ECheckBoxState::Checked).OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnMedianLaneCheckStateChanged) .Content()[ SNew(STextBlock).Text(FText::FromString("Median")) ] ]
 				+ SHorizontalBox::Slot().AutoWidth().Padding(5) [ SNew(SCheckBox).IsChecked(ECheckBoxState::Checked).OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnOtherLaneCheckStateChanged) .Content()[ SNew(STextBlock).Text(FText::FromString("Other")) ] ]
+			]
+			+ SVerticalBox::Slot().AutoHeight().Padding(5.f, 2.f, 0.f, 0.f)
+			[
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot().AutoWidth().Padding(5) [ SNew(SCheckBox).IsChecked(ECheckBoxState::Checked).OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnReferenceLaneCheckStateChanged) .Content()[ SNew(STextBlock).Text(FText::FromString("Reference")) ] ]
 			]
 			+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 10.f, 0.f, 0.f).HAlign(HAlign_Center) [ SNew(SSeparator) ]
 
@@ -406,6 +423,16 @@ void SOpenDRIVEEditorModeWidget::OnSidewalkLaneCheckStateChanged(ECheckBoxState 
 	GetEdMode()->SetGenerateSidewalkLane(state == ECheckBoxState::Checked);
 }
 
+void SOpenDRIVEEditorModeWidget::OnGenerateRoadsCheckStateChanged(ECheckBoxState state)
+{
+	GetEdMode()->SetGenerateRoads(state == ECheckBoxState::Checked);
+}
+
+void SOpenDRIVEEditorModeWidget::OnGenerateJunctionsCheckStateChanged(ECheckBoxState state)
+{
+	GetEdMode()->SetGenerateJunctions(state == ECheckBoxState::Checked);
+}
+
 void SOpenDRIVEEditorModeWidget::OnBikingLaneCheckStateChanged(ECheckBoxState state)
 {
 	GetEdMode()->SetGenerateBikingLane(state == ECheckBoxState::Checked);
@@ -434,6 +461,11 @@ void SOpenDRIVEEditorModeWidget::OnMedianLaneCheckStateChanged(ECheckBoxState st
 void SOpenDRIVEEditorModeWidget::OnOtherLaneCheckStateChanged(ECheckBoxState state)
 {
 	GetEdMode()->SetGenerateOtherLane(state == ECheckBoxState::Checked);
+}
+
+void SOpenDRIVEEditorModeWidget::OnReferenceLaneCheckStateChanged(ECheckBoxState state)
+{
+	GetEdMode()->SetGenerateReferenceLane(state == ECheckBoxState::Checked);
 }
 
 TSharedRef<SWidget> SOpenDRIVEEditorModeWidget::MakeSplineResampleModeWidget(TSharedPtr<FString> InOption)

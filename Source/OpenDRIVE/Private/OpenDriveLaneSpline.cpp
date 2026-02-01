@@ -52,7 +52,14 @@ void AOpenDriveLaneSpline::Initialize(roadmanager::Road* road, roadmanager::Lane
 		LaneType = "Median";
 		break;
 	default:
-		LaneType = "None";
+		if (LaneId == 0)
+		{
+			LaneType = "Reference Line";
+		}
+		else
+		{
+			LaneType = "None";
+		}
 		break;
 	}
 	
@@ -80,7 +87,8 @@ void AOpenDriveLaneSpline::Initialize(roadmanager::Road* road, roadmanager::Lane
 		break;
 	}
 
-	FString NewTag = FString::Printf(TEXT("%s:%s"), *LaneType, *ModeString);
+	FString RoadTypeInfo = (JunctionId == -1) ? TEXT("Road") : TEXT("Junction");
+	FString NewTag = FString::Printf(TEXT("%s:%s:%s"), *LaneType, *ModeString, *RoadTypeInfo);
 	Tags.Add(FName(*NewTag));
 
 	if (LaneId == 0)
