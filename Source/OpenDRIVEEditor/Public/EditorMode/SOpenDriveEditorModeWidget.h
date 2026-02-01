@@ -106,6 +106,7 @@ protected :
 	void OnMedianLaneCheckStateChanged(ECheckBoxState state);
 	void OnOtherLaneCheckStateChanged(ECheckBoxState state);
 	void OnReferenceLaneCheckStateChanged(ECheckBoxState state);
+	void OnGenerateOutermostDrivingLaneOnlyCheckStateChanged(ECheckBoxState state);
 
 	/**
 	* Called when spline generation mode is changed
