@@ -55,6 +55,10 @@ void AOpenDriveLaneSpline::Initialize(roadmanager::Road* road, roadmanager::Lane
 		LaneType = "None";
 		break;
 	}
+	
+	SplineComponent->ComponentTags.Add(FName(*LaneType));
+	UE_LOG(LogTemp, Log, TEXT("AOpenDriveLaneSpline::Initialize: RoadId=%d, LaneId=%d, LaneType=%s, TagsNum=%d"), RoadId, LaneId, *LaneType, SplineComponent->ComponentTags.Num());
+
 
 	double laneLength = _laneSection->GetLength();
 	double s = _laneSection->GetS();
