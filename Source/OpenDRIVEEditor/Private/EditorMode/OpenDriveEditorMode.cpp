@@ -171,6 +171,31 @@ void FOpenDRIVEEditorMode::GenerateLaneSplines()
 			if (bIsJunction && !bGenerateJunctions) continue;
 			if (!bIsJunction && !bGenerateRoads) continue;
 
+			// Identify Outermost Driving Lanes
+			int32 minRightDrivingId = 0;
+			int32 maxLeftDrivingId = 0;
+
+			if (bGenerateOutermostDrivingLaneOnly)
+			{
+				for (int m = 0; m < laneSection->GetNumberOfLanes(); m++)
+				{
+					roadmanager::Lane* checkLane = laneSection->GetLaneByIdx(m);
+					if (!checkLane) continue;
+					if (checkLane->GetLaneType() == roadmanager::Lane::LaneType::LANE_TYPE_DRIVING)
+					{
+						int32 id = checkLane->GetId();
+						if (id < 0) // Right lane (ID is negative, outermost is smallest value e.g. -3)
+						{
+							if (minRightDrivingId == 0 || id < minRightDrivingId) minRightDrivingId = id;
+						}
+						else if (id > 0) // Left lane (ID is positive, outermost is largest value e.g. 3)
+						{
+							if (maxLeftDrivingId == 0 || id > maxLeftDrivingId) maxLeftDrivingId = id;
+						}
+					}
+				}
+			}
+
 			for (int k = 0; k < laneSection->GetNumberOfLanes(); k++)
 			{
 				lane = laneSection->GetLaneByIdx(k);
@@ -189,6 +214,12 @@ void FOpenDRIVEEditorMode::GenerateLaneSplines()
 					{
 					case roadmanager::Lane::LaneType::LANE_TYPE_DRIVING:
 						bShouldGenerate = bGenerateDrivingLane;
+						if (bShouldGenerate && bGenerateOutermostDrivingLaneOnly)
+						{
+							int32 id = lane->GetId();
+							if (id < 0 && id != minRightDrivingId) bShouldGenerate = false;
+							if (id > 0 && id != maxLeftDrivingId) bShouldGenerate = false;
+						}
 						break;
 					case roadmanager::Lane::LaneType::LANE_TYPE_SIDEWALK:
 						bShouldGenerate = bGenerateSidewalkLane;

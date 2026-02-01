@@ -130,6 +130,10 @@ public :
 	void SetGenerateReferenceLane(bool bGenerate) { bGenerateReferenceLane = bGenerate; }
 	bool GetGenerateReferenceLane() const { return bGenerateReferenceLane; }
 
+	bool bGenerateOutermostDrivingLaneOnly = false;
+	void SetGenerateOutermostDrivingLaneOnly(bool bGenerate) { bGenerateOutermostDrivingLaneOnly = bGenerate; }
+	bool GetGenerateOutermostDrivingLaneOnly() const { return bGenerateOutermostDrivingLaneOnly; }
+
 
 protected :
 

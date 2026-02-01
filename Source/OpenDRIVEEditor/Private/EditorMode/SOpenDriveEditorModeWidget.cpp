@@ -274,6 +274,7 @@ TSharedRef<SBorder> SOpenDRIVEEditorModeWidget::ConstructRoadGenerationParameter
 			[
 				SNew(SHorizontalBox)
 				+ SHorizontalBox::Slot().AutoWidth().Padding(5) [ SNew(SCheckBox).IsChecked(ECheckBoxState::Checked).OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnReferenceLaneCheckStateChanged) .Content()[ SNew(STextBlock).Text(FText::FromString("Reference")) ] ]
+				+ SHorizontalBox::Slot().AutoWidth().Padding(5) [ SNew(SCheckBox).IsChecked(ECheckBoxState::Unchecked).OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnGenerateOutermostDrivingLaneOnlyCheckStateChanged) .Content()[ SNew(STextBlock).Text(FText::FromString("Outermost Driving Lane Only")) ] ]
 			]
 			+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 10.f, 0.f, 0.f).HAlign(HAlign_Center) [ SNew(SSeparator) ]
 
@@ -466,6 +467,11 @@ void SOpenDRIVEEditorModeWidget::OnOtherLaneCheckStateChanged(ECheckBoxState sta
 void SOpenDRIVEEditorModeWidget::OnReferenceLaneCheckStateChanged(ECheckBoxState state)
 {
 	GetEdMode()->SetGenerateReferenceLane(state == ECheckBoxState::Checked);
+}
+
+void SOpenDRIVEEditorModeWidget::OnGenerateOutermostDrivingLaneOnlyCheckStateChanged(ECheckBoxState state)
+{
+	GetEdMode()->SetGenerateOutermostDrivingLaneOnly(state == ECheckBoxState::Checked);
 }
 
 TSharedRef<SWidget> SOpenDRIVEEditorModeWidget::MakeSplineResampleModeWidget(TSharedPtr<FString> InOption)
