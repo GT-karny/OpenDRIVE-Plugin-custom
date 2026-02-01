@@ -88,6 +88,19 @@ protected :
 	* @param value The new value
 	*/
 	void OnOffsetValueChanged(float value);
+	
+	/**
+	* Called when lane type checkboxes state is changed
+	*/
+	void OnDrivingLaneCheckStateChanged(ECheckBoxState state);
+	void OnSidewalkLaneCheckStateChanged(ECheckBoxState state);
+	void OnBikingLaneCheckStateChanged(ECheckBoxState state);
+	void OnParkingLaneCheckStateChanged(ECheckBoxState state);
+	void OnShoulderLaneCheckStateChanged(ECheckBoxState state);
+	void OnRestrictedLaneCheckStateChanged(ECheckBoxState state);
+	void OnMedianLaneCheckStateChanged(ECheckBoxState state);
+	void OnOtherLaneCheckStateChanged(ECheckBoxState state);
+
 
 	/**
 	* Called when the step value is changed with the slider

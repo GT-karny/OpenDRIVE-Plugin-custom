@@ -80,6 +80,41 @@ public :
 	* @param bIsVisible True for visible, False for hidden
 	*/
 	void SetRoadsVisibilityInEditor(bool bIsVisible);
+	
+	// Lane generation flags
+	bool bGenerateDrivingLane = true;
+	bool bGenerateSidewalkLane = true;
+	bool bGenerateBikingLane = true;
+	bool bGenerateParkingLane = true;
+	bool bGenerateShoulderLane = true;
+	bool bGenerateRestrictedLane = true;
+	bool bGenerateMedianLane = true;
+	bool bGenerateOtherLane = true;
+
+	void SetGenerateDrivingLane(bool bGenerate) { bGenerateDrivingLane = bGenerate; }
+	bool GetGenerateDrivingLane() const { return bGenerateDrivingLane; }
+
+	void SetGenerateSidewalkLane(bool bGenerate) { bGenerateSidewalkLane = bGenerate; }
+	bool GetGenerateSidewalkLane() const { return bGenerateSidewalkLane; }
+
+	void SetGenerateBikingLane(bool bGenerate) { bGenerateBikingLane = bGenerate; }
+	bool GetGenerateBikingLane() const { return bGenerateBikingLane; }
+
+	void SetGenerateParkingLane(bool bGenerate) { bGenerateParkingLane = bGenerate; }
+	bool GetGenerateParkingLane() const { return bGenerateParkingLane; }
+	
+	void SetGenerateShoulderLane(bool bGenerate) { bGenerateShoulderLane = bGenerate; }
+	bool GetGenerateShoulderLane() const { return bGenerateShoulderLane; }
+
+	void SetGenerateRestrictedLane(bool bGenerate) { bGenerateRestrictedLane = bGenerate; }
+	bool GetGenerateRestrictedLane() const { return bGenerateRestrictedLane; }
+
+	void SetGenerateMedianLane(bool bGenerate) { bGenerateMedianLane = bGenerate; }
+	bool GetGenerateMedianLane() const { return bGenerateMedianLane; }
+
+	void SetGenerateOtherLane(bool bGenerate) { bGenerateOtherLane = bGenerate; }
+	bool GetGenerateOtherLane() const { return bGenerateOtherLane; }
+
 
 protected :
 

@@ -57,7 +57,11 @@ void AOpenDriveLaneSpline::Initialize(roadmanager::Road* road, roadmanager::Lane
 	}
 	
 	SplineComponent->ComponentTags.Add(FName(*LaneType));
-	UE_LOG(LogTemp, Log, TEXT("AOpenDriveLaneSpline::Initialize: RoadId=%d, LaneId=%d, LaneType=%s, TagsNum=%d"), RoadId, LaneId, *LaneType, SplineComponent->ComponentTags.Num());
+
+	if (LaneId == 0)
+	{
+		SplineComponent->ComponentTags.Add(FName("Reference Line"));
+	}
 
 
 	double laneLength = _laneSection->GetLength();
