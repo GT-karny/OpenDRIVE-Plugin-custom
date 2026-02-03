@@ -1,8 +1,10 @@
-#pragma once 
+#pragma once
 #include "EditorModes.h"
 #include "EdMode.h"
 #include "../OpenDriveEditorLane.h"
 #include "OpenDriveLaneSpline.h"
+
+class USignalTypeMapping;
 
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnLaneSelected, AOpenDriveEditorLane* road)
 
@@ -134,6 +136,25 @@ public :
 	void SetGenerateOutermostDrivingLaneOnly(bool bGenerate) { bGenerateOutermostDrivingLaneOnly = bGenerate; }
 	bool GetGenerateOutermostDrivingLaneOnly() const { return bGenerateOutermostDrivingLaneOnly; }
 
+	// === Signal Generation ===
+
+	/**
+	 * Generates signal actors from OpenDRIVE data.
+	 */
+	void GenerateSignals();
+
+	/**
+	 * Clears all generated signal actors.
+	 */
+	void ClearGeneratedSignals();
+
+	bool bGenerateSignals = true;
+	void SetGenerateSignals(bool Val) { bGenerateSignals = Val; }
+	bool GetGenerateSignals() const { return bGenerateSignals; }
+
+	USignalTypeMapping* SignalTypeMappingAsset = nullptr;
+	void SetSignalTypeMappingAsset(USignalTypeMapping* Asset) { SignalTypeMappingAsset = Asset; }
+	USignalTypeMapping* GetSignalTypeMappingAsset() const { return SignalTypeMappingAsset; }
 
 protected :
 
@@ -173,5 +194,8 @@ public:
 
 private:
 	AOpenDriveLaneSpline::EOpenDriveLaneSplineMode SplineGenerationMode = AOpenDriveLaneSpline::Center;
+
+	/** Array of spawned signal actors for cleanup */
+	TArray<AActor*> GeneratedSignals;
 };
 

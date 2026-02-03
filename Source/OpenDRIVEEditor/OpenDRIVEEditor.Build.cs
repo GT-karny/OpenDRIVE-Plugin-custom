@@ -42,6 +42,7 @@ public class OpenDRIVEEditor : ModuleRules
 				"ComponentVisualizers",
 				"OpenDRIVE",
 				"RoadManager",
+				"GT_RM",
 			}
 		);
 			
