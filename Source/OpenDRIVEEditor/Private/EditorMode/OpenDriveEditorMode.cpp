@@ -5,6 +5,10 @@
 #include "ScopedTransaction.h"
 #include "Public/EditorMode/OpenDriveEditorToolkit.h"
 #include "RoadManager.hpp"
+#include "SignalInfoComponent.h"
+#include "SignalTypeMapping.h"
+#include "CoordTranslate.h"
+#include "GT_esminiRMLib.hpp"
 
 const FEditorModeID FOpenDRIVEEditorMode::EM_RoadMode(TEXT("EM_RoadMode"));
 
@@ -287,7 +291,7 @@ void FOpenDRIVEEditorMode::OnActorSelected(UObject* selectedObject)
 	if (IsValid(selectedRoad) == true)
 	{
 		UE_LOG(LogClass, Warning, TEXT("road selected"));
-	
+
 		TSharedPtr<FOpenDRIVEEditorModeToolkit> openDRIVEEdToolkit = StaticCastSharedPtr<FOpenDRIVEEditorModeToolkit>(Toolkit);
 
 		if (openDRIVEEdToolkit.IsValid())
@@ -300,4 +304,132 @@ void FOpenDRIVEEditorMode::OnActorSelected(UObject* selectedObject)
 			}
 		}
 	}
+}
+
+void FOpenDRIVEEditorMode::GenerateSignals()
+{
+	// Clear existing signals first
+	ClearGeneratedSignals();
+
+	if (!bGenerateSignals)
+	{
+		return;
+	}
+
+	// Get number of roads
+	int NumRoads = GT_RM_GetNumRoads();
+	if (NumRoads <= 0)
+	{
+		UE_LOG(LogClass, Warning, TEXT("GenerateSignals: No roads found or GT_RM not initialized"));
+		return;
+	}
+
+	// Actor spawn parameters
+	FActorSpawnParameters SpawnParams;
+	SpawnParams.bHideFromSceneOutliner = false;
+	SpawnParams.bTemporaryEditorActor = false;
+
+	int32 TotalSignalsSpawned = 0;
+
+	// Iterate all roads
+	for (int RoadIdx = 0; RoadIdx < NumRoads; RoadIdx++)
+	{
+		uint32_t RoadId = GT_RM_GetRoadIdByIndex(RoadIdx);
+		if (RoadId == 0xFFFFFFFF) continue;
+
+		int SignalCount = GT_RM_GetRoadSignalCount(RoadId);
+		if (SignalCount <= 0) continue;
+
+		// Iterate all signals on this road
+		for (int SignalIdx = 0; SignalIdx < SignalCount; SignalIdx++)
+		{
+			GT_RM_RoadSignalInfo SignalInfo;
+			int Result = GT_RM_GetRoadSignal(RoadId, SignalIdx, &SignalInfo);
+			if (Result != 0) continue;
+
+			// Determine actor class to spawn
+			TSubclassOf<AActor> ActorClass = nullptr;
+			if (SignalTypeMappingAsset)
+			{
+				ActorClass = SignalTypeMappingAsset->FindActorClassForSignal(
+					FString(UTF8_TO_TCHAR(SignalInfo.type)),
+					FString(UTF8_TO_TCHAR(SignalInfo.subtype)),
+					FString(UTF8_TO_TCHAR(SignalInfo.country))
+				);
+			}
+
+			if (!ActorClass)
+			{
+				UE_LOG(LogClass, Warning, TEXT("GenerateSignals: No actor class for signal type=%s subtype=%s (Road %d, Signal %d)"),
+					UTF8_TO_TCHAR(SignalInfo.type), UTF8_TO_TCHAR(SignalInfo.subtype), RoadId, SignalInfo.id);
+				continue;
+			}
+
+			// Convert coordinates: GT_RM provides x,y,z in meters (OpenDRIVE coordinate system)
+			// Need to convert to Unreal coordinate system (cm, left-handed)
+			FVector Location(
+				SignalInfo.x * 100.0,   // meters to cm
+				-SignalInfo.y * 100.0,  // Y negated for left-handed coordinate system
+				SignalInfo.z * 100.0    // meters to cm
+			);
+
+			// Convert rotation: h (heading), p (pitch), r (roll) in radians
+			FRotator Rotation(
+				FMath::RadiansToDegrees(SignalInfo.p),   // Pitch
+				FMath::RadiansToDegrees(-SignalInfo.h),  // Yaw (negated for UE coordinate system)
+				FMath::RadiansToDegrees(SignalInfo.r)    // Roll
+			);
+
+			FTransform SpawnTransform(Rotation, Location);
+
+			// Spawn the actor
+			AActor* SignalActor = GetWorld()->SpawnActor<AActor>(ActorClass, SpawnTransform, SpawnParams);
+			if (!SignalActor) continue;
+
+			// Add SignalInfoComponent and populate it
+			USignalInfoComponent* InfoComp = NewObject<USignalInfoComponent>(SignalActor, NAME_None, RF_Transactional);
+			InfoComp->SignalId = SignalInfo.id;
+			InfoComp->RoadId = static_cast<int32>(RoadId);
+			InfoComp->S = SignalInfo.s;
+			InfoComp->T = SignalInfo.t;
+			InfoComp->Type = FString(UTF8_TO_TCHAR(SignalInfo.type));
+			InfoComp->SubType = FString(UTF8_TO_TCHAR(SignalInfo.subtype));
+			InfoComp->Country = FString(UTF8_TO_TCHAR(SignalInfo.country));
+			InfoComp->Value = SignalInfo.value;
+			InfoComp->Unit = FString(UTF8_TO_TCHAR(SignalInfo.unit));
+			InfoComp->Text = FString(UTF8_TO_TCHAR(SignalInfo.text));
+			InfoComp->bIsDynamic = SignalInfo.isDynamic;
+			InfoComp->Height = SignalInfo.height;
+			InfoComp->Width = SignalInfo.width;
+			InfoComp->RegisterComponent();
+			SignalActor->AddInstanceComponent(InfoComp);
+
+#if WITH_EDITOR
+			// Organize in editor folder
+			FString FolderPath = FString::Printf(TEXT("Signals/Road_%d"), RoadId);
+			SignalActor->SetFolderPath(FName(*FolderPath));
+
+			// Set actor label
+			FString Label = FString::Printf(TEXT("Signal_%d_%s"), SignalInfo.id, *InfoComp->Type);
+			SignalActor->SetActorLabel(Label);
+#endif
+
+			GeneratedSignals.Add(SignalActor);
+			TotalSignalsSpawned++;
+		}
+	}
+
+	UE_LOG(LogClass, Log, TEXT("GenerateSignals: Spawned %d signals"), TotalSignalsSpawned);
+}
+
+void FOpenDRIVEEditorMode::ClearGeneratedSignals()
+{
+	for (AActor* Signal : GeneratedSignals)
+	{
+		if (IsValid(Signal))
+		{
+			Signal->Destroy();
+		}
+	}
+	GeneratedSignals.Empty();
 }

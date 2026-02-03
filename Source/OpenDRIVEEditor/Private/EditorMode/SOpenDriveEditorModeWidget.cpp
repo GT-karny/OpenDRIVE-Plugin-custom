@@ -2,6 +2,7 @@
 #include "Public/OpenDriveEditor.h"
 #include "Public/EditorMode/OpenDriveEditorMode.h"
 #include "Public/EditorMode/SOpenDriveEditorModeWidget.h"
+#include "SignalTypeMapping.h"
 
 void SOpenDRIVEEditorModeWidget::Construct(const FArguments& InArgs)
 {
@@ -150,26 +151,37 @@ TSharedRef<SHorizontalBox> SOpenDRIVEEditorModeWidget::ConstructButtons(const FA
 
 	StaticCast<STextBlock&>(generateSplinesButton.ToSharedRef().Get().GetContent().Get()).SetJustification(ETextJustify::Center);
 
-	/* 
+	// Generate Signals Button
+	TSharedPtr<SButton> generateSignalsButton = SNew(SButton).Text(FText::FromString("Gen Signals"))
+		.OnClicked(this, &SOpenDRIVEEditorModeWidget::GenerateSignals).IsEnabled(this, &SOpenDRIVEEditorModeWidget::CheckIfInEditorMode)
+		.ToolTipText(FText::FromString(TEXT("Generates signal actors from OpenDRIVE data.")));
+
+	StaticCast<STextBlock&>(generateSignalsButton.ToSharedRef().Get().GetContent().Get()).SetJustification(ETextJustify::Center);
+
+	/*
 	 * Layout Strategy:
 	 * Since the return type signature is TSharedRef<SHorizontalBox>, we MUST return a HorizontalBox.
 	 * We can either put all buttons in one row, or put a VerticalBox inside the HorizontalBox.
-	 * Let's try putting all 3 buttons in one row for simplicity and to match the signature.
+	 * Let's try putting all 4 buttons in one row for simplicity and to match the signature.
 	 */
 
-	TSharedRef<SHorizontalBox> horBox = 
+	TSharedRef<SHorizontalBox> horBox =
 		SNew(SHorizontalBox)
-		+ SHorizontalBox::Slot().Padding(20, 0, 0, 0).FillWidth(0.33f)
+		+ SHorizontalBox::Slot().Padding(20, 0, 0, 0).FillWidth(0.25f)
 		[
 			resetButton.ToSharedRef()
 		]
-		+ SHorizontalBox::Slot().Padding(10, 0, 0, 0).FillWidth(0.33f)
+		+ SHorizontalBox::Slot().Padding(10, 0, 0, 0).FillWidth(0.25f)
 		[
 			generateButton.ToSharedRef()
 		]
-		+ SHorizontalBox::Slot().Padding(10, 0, 20, 0).FillWidth(0.33f)
+		+ SHorizontalBox::Slot().Padding(10, 0, 0, 0).FillWidth(0.25f)
 		[
 			generateSplinesButton.ToSharedRef()
+		]
+		+ SHorizontalBox::Slot().Padding(10, 0, 20, 0).FillWidth(0.25f)
+		[
+			generateSignalsButton.ToSharedRef()
 		];
 
 	return horBox;
@@ -332,7 +344,43 @@ TSharedRef<SBorder> SOpenDRIVEEditorModeWidget::ConstructRoadGenerationParameter
 			[
 				StepSlider
 			]
-			
+			+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 10.f, 0.f, 0.f).HAlign(HAlign_Center) [ SNew(SSeparator) ]
+			// Signal Generation Section
+			+ SVerticalBox::Slot().AutoHeight().Padding(5.f, 5.f, 0.f, 0.f)
+			[
+				SNew(STextBlock).Text(FText::FromString("Signal Generation")).Font(*_fontInfoPtr).Justification(ETextJustify::Center)
+			]
+			+ SVerticalBox::Slot().AutoHeight().Padding(5.f, 2.f, 0.f, 0.f)
+			[
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot().AutoWidth().Padding(5)
+				[
+					SAssignNew(_generateSignalsCheckBox, SCheckBox)
+						.IsChecked(ECheckBoxState::Checked)
+						.OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnGenerateSignalsCheckStateChanged)
+						.Content()
+						[
+							SNew(STextBlock).Text(FText::FromString("Generate Signals"))
+						]
+				]
+			]
+			+ SVerticalBox::Slot().AutoHeight().Padding(5.f, 2.f, 5.f, 10.f)
+			[
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(5)
+				[
+					SNew(STextBlock)
+						.Text(FText::FromString("Mapping Asset:"))
+						.Font(*_fontInfoPtr)
+				]
+				+ SHorizontalBox::Slot().FillWidth(1.0f).Padding(5)
+				[
+					SNew(SObjectPropertyEntryBox)
+						.AllowedClass(USignalTypeMapping::StaticClass())
+						.ObjectPath(this, &SOpenDRIVEEditorModeWidget::GetSignalMappingAssetPath)
+						.OnObjectChanged(this, &SOpenDRIVEEditorModeWidget::OnSignalMappingAssetSelected)
+				]
+			]
 		];
 
 	return border;
@@ -495,5 +543,28 @@ void SOpenDRIVEEditorModeWidget::OnSplineResampleModeChanged(TSharedPtr<FString>
 	{
 		GetEdMode()->SetSplineGenerationMode(AOpenDriveLaneSpline::Outside);
 	}
+}
+
+FReply SOpenDRIVEEditorModeWidget::GenerateSignals()
+{
+	GetEdMode()->GenerateSignals();
+	return FReply::Handled();
+}
+
+void SOpenDRIVEEditorModeWidget::OnGenerateSignalsCheckStateChanged(ECheckBoxState state)
+{
+	GetEdMode()->SetGenerateSignals(state == ECheckBoxState::Checked);
+}
+
+FString SOpenDRIVEEditorModeWidget::GetSignalMappingAssetPath() const
+{
+	USignalTypeMapping* Asset = GetEdMode()->GetSignalTypeMappingAsset();
+	return Asset ? Asset->GetPathName() : FString();
+}
+
+void SOpenDRIVEEditorModeWidget::OnSignalMappingAssetSelected(const FAssetData& AssetData)
+{
+	USignalTypeMapping* Asset = Cast<USignalTypeMapping>(AssetData.GetAsset());
+	GetEdMode()->SetSignalTypeMappingAsset(Asset);
 }
 
