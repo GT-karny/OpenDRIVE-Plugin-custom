@@ -120,6 +120,33 @@ protected :
 	*/
 	void OnStepValueChanged(float value);
 
+	// === Signal Generation ===
+
+	/**
+	* Link the GenerateSignals() function in the OpenDRIVEEditorMode.cpp file
+	*/
+	FReply GenerateSignals();
+
+	/**
+	* Called when generate signals checkbox state is changed
+	*/
+	void OnGenerateSignalsCheckStateChanged(ECheckBoxState state);
+
+	/**
+	* Called when flip signal orientation checkbox state is changed
+	*/
+	void OnFlipSignalOrientationCheckStateChanged(ECheckBoxState state);
+
+	/**
+	* Gets the path of the signal mapping asset
+	*/
+	FString GetSignalMappingAssetPath() const;
+
+	/**
+	* Called when signal mapping asset is selected
+	*/
+	void OnSignalMappingAssetSelected(const FAssetData& AssetData);
+
 private : 
 
 	//Text font
@@ -144,4 +171,8 @@ private :
 	TSharedPtr<STextBlock> _laneTypeTextPtr;
 	TSharedPtr<STextBlock> _successorIdTextPtr;
 	TSharedPtr<STextBlock> _predecessorIdTextPtr;
+
+	// Signal generation
+	TSharedPtr<SCheckBox> _generateSignalsCheckBox;
+	TSharedPtr<SCheckBox> _flipSignalOrientationCheckBox;
 };
