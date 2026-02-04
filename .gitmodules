@@ -1,3 +1,9 @@
 [submodule "Source/ThirdParty/RoadManager/modules/esmini"]
 	path = Source/ThirdParty/RoadManager/modules/esmini
 	url = https://github.com/brifsttar/esmini.git
+[submodule "Source/ThirdParty/GT_RM/module/esmini"]
+	path = Source/ThirdParty/GT_RM/module/esmini
+	url = https://github.com/GT-karny/esmini.git
+[submodule "Source/ThirdParty/GT_RM/modules/esmini"]
+	path = Source/ThirdParty/GT_RM/modules/esmini
+	url = https://github.com/GT-karny/esmini.git
