@@ -363,6 +363,16 @@ TSharedRef<SBorder> SOpenDRIVEEditorModeWidget::ConstructRoadGenerationParameter
 							SNew(STextBlock).Text(FText::FromString("Generate Signals"))
 						]
 				]
+				+ SHorizontalBox::Slot().AutoWidth().Padding(15, 0, 5, 0)
+				[
+					SAssignNew(_flipSignalOrientationCheckBox, SCheckBox)
+						.IsChecked(ECheckBoxState::Unchecked)
+						.OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnFlipSignalOrientationCheckStateChanged)
+						.Content()
+						[
+							SNew(STextBlock).Text(FText::FromString("Flip Orientation"))
+						]
+				]
 			]
 			+ SVerticalBox::Slot().AutoHeight().Padding(5.f, 2.f, 5.f, 10.f)
 			[
@@ -554,6 +564,11 @@ FReply SOpenDRIVEEditorModeWidget::GenerateSignals()
 void SOpenDRIVEEditorModeWidget::OnGenerateSignalsCheckStateChanged(ECheckBoxState state)
 {
 	GetEdMode()->SetGenerateSignals(state == ECheckBoxState::Checked);
+}
+
+void SOpenDRIVEEditorModeWidget::OnFlipSignalOrientationCheckStateChanged(ECheckBoxState state)
+{
+	GetEdMode()->SetFlipSignalOrientation(state == ECheckBoxState::Checked);
 }
 
 FString SOpenDRIVEEditorModeWidget::GetSignalMappingAssetPath() const
