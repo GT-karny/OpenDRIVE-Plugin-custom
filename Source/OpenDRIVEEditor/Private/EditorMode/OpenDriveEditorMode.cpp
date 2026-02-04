@@ -8,7 +8,6 @@
 #include "SignalInfoComponent.h"
 #include "SignalTypeMapping.h"
 #include "CoordTranslate.h"
-#include "GT_esminiRMLib.hpp"
 
 const FEditorModeID FOpenDRIVEEditorMode::EM_RoadMode(TEXT("EM_RoadMode"));
 
@@ -316,11 +315,18 @@ void FOpenDRIVEEditorMode::GenerateSignals()
 		return;
 	}
 
-	// Get number of roads
-	int NumRoads = GT_RM_GetNumRoads();
-	if (NumRoads <= 0)
+	// Get OpenDrive instance (same pattern as GenerateLaneSplines)
+	roadmanager::OpenDrive* Odr = roadmanager::Position::GetOpenDrive();
+	if (!Odr)
 	{
-		UE_LOG(LogClass, Warning, TEXT("GenerateSignals: No roads found or GT_RM not initialized"));
+		UE_LOG(LogClass, Warning, TEXT("GenerateSignals: OpenDrive not loaded"));
+		return;
+	}
+
+	size_t NumRoads = Odr->GetNumOfRoads();
+	if (NumRoads == 0)
+	{
+		UE_LOG(LogClass, Warning, TEXT("GenerateSignals: No roads found"));
 		return;
 	}
 
@@ -332,52 +338,71 @@ void FOpenDRIVEEditorMode::GenerateSignals()
 	int32 TotalSignalsSpawned = 0;
 
 	// Iterate all roads
-	for (int RoadIdx = 0; RoadIdx < NumRoads; RoadIdx++)
+	for (size_t RoadIdx = 0; RoadIdx < NumRoads; RoadIdx++)
 	{
-		uint32_t RoadId = GT_RM_GetRoadIdByIndex(RoadIdx);
-		if (RoadId == 0xFFFFFFFF) continue;
+		roadmanager::Road* Road = Odr->GetRoadByIdx(static_cast<int>(RoadIdx));
+		if (!Road) continue;
 
-		int SignalCount = GT_RM_GetRoadSignalCount(RoadId);
+		int RoadId = Road->GetId();
+		int SignalCount = Road->GetNumberOfSignals();
 		if (SignalCount <= 0) continue;
 
 		// Iterate all signals on this road
 		for (int SignalIdx = 0; SignalIdx < SignalCount; SignalIdx++)
 		{
-			GT_RM_RoadSignalInfo SignalInfo;
-			int Result = GT_RM_GetRoadSignal(RoadId, SignalIdx, &SignalInfo);
-			if (Result != 0) continue;
+			roadmanager::Signal* Signal = Road->GetSignal(SignalIdx);
+			if (!Signal) continue;
+
+			// Get signal properties
+			FString SignalType = FString(UTF8_TO_TCHAR(Signal->GetType().c_str()));
+			FString SignalSubType = FString(UTF8_TO_TCHAR(Signal->GetSubType().c_str()));
+			FString SignalCountry = FString(UTF8_TO_TCHAR(Signal->GetCountry().c_str()));
 
 			// Determine actor class to spawn
 			TSubclassOf<AActor> ActorClass = nullptr;
 			if (SignalTypeMappingAsset)
 			{
 				ActorClass = SignalTypeMappingAsset->FindActorClassForSignal(
-					FString(UTF8_TO_TCHAR(SignalInfo.type)),
-					FString(UTF8_TO_TCHAR(SignalInfo.subtype)),
-					FString(UTF8_TO_TCHAR(SignalInfo.country))
+					SignalType,
+					SignalSubType,
+					SignalCountry
 				);
 			}
 
 			if (!ActorClass)
 			{
 				UE_LOG(LogClass, Warning, TEXT("GenerateSignals: No actor class for signal type=%s subtype=%s (Road %d, Signal %d)"),
-					UTF8_TO_TCHAR(SignalInfo.type), UTF8_TO_TCHAR(SignalInfo.subtype), RoadId, SignalInfo.id);
+					*SignalType, *SignalSubType, RoadId, Signal->GetId());
 				continue;
 			}
 
-			// Convert coordinates: GT_RM provides x,y,z in meters (OpenDRIVE coordinate system)
-			// Need to convert to Unreal coordinate system (cm, left-handed)
+			// Use Signal's pre-computed world coordinates
+			// Note: Signal->GetH() already includes orientation adjustment (adds π for NEGATIVE orientation)
+			double X = Signal->GetX();
+			double Y = Signal->GetY();
+			double Z = Signal->GetZ() + Signal->GetZOffset();
+			double H = Signal->GetH() + Signal->GetHOffset();
+			double P = Signal->GetPitch();
+			double R = Signal->GetRoll();
+
+			// Apply flip if enabled
+			if (bFlipSignalOrientation)
+			{
+				H += M_PI;
+			}
+
+			// Convert coordinates: OpenDRIVE (meters, right-handed) -> Unreal (cm, left-handed)
 			FVector Location(
-				SignalInfo.x * 100.0,   // meters to cm
-				-SignalInfo.y * 100.0,  // Y negated for left-handed coordinate system
-				SignalInfo.z * 100.0    // meters to cm
+				X * 100.0,    // meters to cm
+				-Y * 100.0,   // Y negated for left-handed coordinate system
+				Z * 100.0     // meters to cm
 			);
 
 			// Convert rotation: h (heading), p (pitch), r (roll) in radians
 			FRotator Rotation(
-				FMath::RadiansToDegrees(SignalInfo.p),   // Pitch
-				FMath::RadiansToDegrees(-SignalInfo.h),  // Yaw (negated for UE coordinate system)
-				FMath::RadiansToDegrees(SignalInfo.r)    // Roll
+				FMath::RadiansToDegrees(P),    // Pitch
+				FMath::RadiansToDegrees(-H),   // Yaw (negated for UE coordinate system)
+				FMath::RadiansToDegrees(R)     // Roll
 			);
 
 			FTransform SpawnTransform(Rotation, Location);
@@ -388,19 +413,19 @@ void FOpenDRIVEEditorMode::GenerateSignals()
 
 			// Add SignalInfoComponent and populate it
 			USignalInfoComponent* InfoComp = NewObject<USignalInfoComponent>(SignalActor, NAME_None, RF_Transactional);
-			InfoComp->SignalId = SignalInfo.id;
-			InfoComp->RoadId = static_cast<int32>(RoadId);
-			InfoComp->S = SignalInfo.s;
-			InfoComp->T = SignalInfo.t;
-			InfoComp->Type = FString(UTF8_TO_TCHAR(SignalInfo.type));
-			InfoComp->SubType = FString(UTF8_TO_TCHAR(SignalInfo.subtype));
-			InfoComp->Country = FString(UTF8_TO_TCHAR(SignalInfo.country));
-			InfoComp->Value = SignalInfo.value;
-			InfoComp->Unit = FString(UTF8_TO_TCHAR(SignalInfo.unit));
-			InfoComp->Text = FString(UTF8_TO_TCHAR(SignalInfo.text));
-			InfoComp->bIsDynamic = SignalInfo.isDynamic;
-			InfoComp->Height = SignalInfo.height;
-			InfoComp->Width = SignalInfo.width;
+			InfoComp->SignalId = Signal->GetId();
+			InfoComp->RoadId = RoadId;
+			InfoComp->S = Signal->GetS();
+			InfoComp->T = Signal->GetT();
+			InfoComp->Type = SignalType;
+			InfoComp->SubType = SignalSubType;
+			InfoComp->Country = SignalCountry;
+			InfoComp->Value = Signal->GetValue();
+			InfoComp->Unit = FString(UTF8_TO_TCHAR(Signal->GetUnit().c_str()));
+			InfoComp->Text = FString(UTF8_TO_TCHAR(Signal->GetText().c_str()));
+			InfoComp->bIsDynamic = Signal->IsDynamic();
+			InfoComp->Height = Signal->GetHeight();
+			InfoComp->Width = Signal->GetWidth();
 			InfoComp->RegisterComponent();
 			SignalActor->AddInstanceComponent(InfoComp);
 
@@ -410,7 +435,7 @@ void FOpenDRIVEEditorMode::GenerateSignals()
 			SignalActor->SetFolderPath(FName(*FolderPath));
 
 			// Set actor label
-			FString Label = FString::Printf(TEXT("Signal_%d_%s"), SignalInfo.id, *InfoComp->Type);
+			FString Label = FString::Printf(TEXT("Signal_%d_%s"), Signal->GetId(), *SignalType);
 			SignalActor->SetActorLabel(Label);
 #endif
 

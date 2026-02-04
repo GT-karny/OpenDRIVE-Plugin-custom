@@ -133,6 +133,11 @@ protected :
 	void OnGenerateSignalsCheckStateChanged(ECheckBoxState state);
 
 	/**
+	* Called when flip signal orientation checkbox state is changed
+	*/
+	void OnFlipSignalOrientationCheckStateChanged(ECheckBoxState state);
+
+	/**
 	* Gets the path of the signal mapping asset
 	*/
 	FString GetSignalMappingAssetPath() const;
@@ -169,4 +174,5 @@ private :
 
 	// Signal generation
 	TSharedPtr<SCheckBox> _generateSignalsCheckBox;
+	TSharedPtr<SCheckBox> _flipSignalOrientationCheckBox;
 };

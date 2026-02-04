@@ -13,5 +13,6 @@ public:
 	virtual void ShutdownModule() override;
 
 private:
-	void *RoadManagerHandle;
+	void* RoadManagerHandle = nullptr;
+	void* GT_esminiLibHandle = nullptr;
 };
