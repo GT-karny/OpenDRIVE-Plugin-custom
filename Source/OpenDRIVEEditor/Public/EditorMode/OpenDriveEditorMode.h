@@ -3,8 +3,7 @@
 #include "EdMode.h"
 #include "../OpenDriveEditorLane.h"
 #include "OpenDriveLaneSpline.h"
-
-class USignalTypeMapping;
+#include "../SignalGenerator.h"
 
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnLaneSelected, AOpenDriveEditorLane* road)
 
@@ -136,29 +135,13 @@ public :
 	void SetGenerateOutermostDrivingLaneOnly(bool bGenerate) { bGenerateOutermostDrivingLaneOnly = bGenerate; }
 	bool GetGenerateOutermostDrivingLaneOnly() const { return bGenerateOutermostDrivingLaneOnly; }
 
-	// === Signal Generation ===
+	// === Signal Generation (delegated to FSignalGenerator) ===
 
-	/**
-	 * Generates signal actors from OpenDRIVE data.
-	 */
-	void GenerateSignals();
+	FSignalGenerator SignalGenerator;
 
-	/**
-	 * Clears all generated signal actors.
-	 */
-	void ClearGeneratedSignals();
-
-	bool bGenerateSignals = true;
-	void SetGenerateSignals(bool Val) { bGenerateSignals = Val; }
-	bool GetGenerateSignals() const { return bGenerateSignals; }
-
-	bool bFlipSignalOrientation = false;
-	void SetFlipSignalOrientation(bool Val) { bFlipSignalOrientation = Val; }
-	bool GetFlipSignalOrientation() const { return bFlipSignalOrientation; }
-
-	USignalTypeMapping* SignalTypeMappingAsset = nullptr;
-	void SetSignalTypeMappingAsset(USignalTypeMapping* Asset) { SignalTypeMappingAsset = Asset; }
-	USignalTypeMapping* GetSignalTypeMappingAsset() const { return SignalTypeMappingAsset; }
+	void GenerateSignals() { SignalGenerator.GenerateSignals(GetWorld()); }
+	void ClearGeneratedSignals() { SignalGenerator.ClearGeneratedSignals(); }
+	FSignalGenerator& GetSignalGenerator() { return SignalGenerator; }
 
 protected :
 
@@ -198,8 +181,5 @@ public:
 
 private:
 	AOpenDriveLaneSpline::EOpenDriveLaneSplineMode SplineGenerationMode = AOpenDriveLaneSpline::Center;
-
-	/** Array of spawned signal actors for cleanup */
-	TArray<AActor*> GeneratedSignals;
 };
 
