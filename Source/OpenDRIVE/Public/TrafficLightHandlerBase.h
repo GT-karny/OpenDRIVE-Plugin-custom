@@ -5,37 +5,47 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "OsiTrafficLightTypes.h"
-#include "BPI_TrafficLightUpdate.h"
 #include "BPI_TrafficLightHandlerUpdate.h"
-#include "BPI_TrafficLightRegister.h"
 #include "TrafficLightHandlerBase.generated.h"
 
 /**
- * Base handler actor for managing OSI traffic light actors.
+ * Broadcast when a traffic light state is updated.
+ * Traffic light actors bind to this delegate and filter by their own ID.
+ */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
+	FOnOsiTrafficLightStateUpdated,
+	int32, TrafficLightId,
+	const FOsiTrafficLightState&, NewState);
+
+/**
+ * Base handler actor for managing OSI traffic light state.
  *
- * Holds a TMap of integer IDs to BPI_TrafficLightUpdate-implementing actors.
- * Implements BPI_TrafficLightHandlerUpdate for receiving state updates from external systems,
- * and BPI_TrafficLightRegister for registering/unregistering traffic light actors.
+ * Manages a state cache and broadcasts updates via delegate.
+ * Does NOT hold references to traffic light actors — actors bind to
+ * OnTrafficLightStateUpdated and filter by their own ID.
  *
  * Usage:
  * 1. Place this actor (or a Blueprint subclass) in the level
- * 2. Register traffic lights via BPI_TrafficLightRegister interface
+ * 2. Traffic light actors bind to OnTrafficLightStateUpdated in BeginPlay
  * 3. External systems call UpdateTrafficLightById() / UpdateTrafficLightsBatch()
  *    through the BPI_TrafficLightHandlerUpdate interface
  */
 UCLASS(Blueprintable)
 class OPENDRIVE_API ATrafficLightHandlerBase : public AActor,
-	public IBPI_TrafficLightHandlerUpdate,
-	public IBPI_TrafficLightRegister
+	public IBPI_TrafficLightHandlerUpdate
 {
 	GENERATED_BODY()
 
 public:
 	ATrafficLightHandlerBase();
 
-	/** ID -> BPI_TrafficLightUpdate implementing actor map */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "OSI Traffic Light|Handler")
-	TMap<int32, TScriptInterface<IBPI_TrafficLightUpdate>> ManagedTrafficLights;
+	/**
+	 * Broadcast when any traffic light state is updated.
+	 * Traffic light actors should bind to this in BeginPlay
+	 * and filter by TrafficLightId.
+	 */
+	UPROPERTY(BlueprintAssignable, Category = "OSI Traffic Light|Handler")
+	FOnOsiTrafficLightStateUpdated OnTrafficLightStateUpdated;
 
 	/**
 	 * Get the current cached state of a traffic light by ID.
@@ -46,19 +56,12 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "OSI Traffic Light|Handler")
 	bool GetTrafficLightState(int32 TrafficLightId, FOsiTrafficLightState& OutState) const;
 
-	// --- BPI_TrafficLightRegister implementation ---
-	virtual bool RegisterTrafficLight_Implementation(int32 TrafficLightId, const TScriptInterface<IBPI_TrafficLightUpdate>& TrafficLightActor) override;
-	virtual bool UnregisterTrafficLight_Implementation(int32 TrafficLightId) override;
-
 	// --- BPI_TrafficLightHandlerUpdate implementation ---
 	virtual void UpdateTrafficLightById_Implementation(int32 TrafficLightId, const FOsiTrafficLightState& NewState) override;
 	virtual void UpdateTrafficLightsBatch_Implementation(const TArray<FOsiTrafficLightBatchEntry>& Updates) override;
 
-protected:
-	/** Propagate a state to a single actor via BPI_TrafficLightUpdate. */
-	void PropagateStateToActor(int32 TrafficLightId, const TScriptInterface<IBPI_TrafficLightUpdate>& Actor, const FOsiTrafficLightState& NewState);
-
 private:
-	/** Cached state per traffic light ID */
+	/** ID -> current state cache */
+	UPROPERTY(VisibleAnywhere, Category = "OSI Traffic Light|Handler")
 	TMap<int32, FOsiTrafficLightState> StateCache;
 };
