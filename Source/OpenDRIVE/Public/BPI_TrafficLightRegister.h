@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "UObject/Interface.h"
+#include "BPI_TrafficLightUpdate.h"
 #include "BPI_TrafficLightRegister.generated.h"
 
 UINTERFACE(MinimalAPI, BlueprintType, Blueprintable)
@@ -29,7 +30,7 @@ public:
 	 * @return true if registered successfully
 	 */
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "OSI Traffic Light|Handler")
-	bool RegisterTrafficLight(int32 TrafficLightId, AActor* TrafficLightActor);
+	bool RegisterTrafficLight(int32 TrafficLightId, const TScriptInterface<IBPI_TrafficLightUpdate>& TrafficLightActor);
 
 	/**
 	 * Unregister a traffic light by its ID.
