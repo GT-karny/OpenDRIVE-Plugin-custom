@@ -8,13 +8,16 @@ ASAM OSI (Open Simulation Interface) 仕様に基づく信号機の状態管理�
 ## アーキテクチャ
 
 ```
-外部システム (esmini, co-sim bridge, etc.)
+外部システム (esmini, co-sim bridge, gRPC, etc.)
     |
-    | BPI_TrafficLightHandlerUpdate::UpdateTrafficLightById(Id, State)
-    | BPI_TrafficLightHandlerUpdate::UpdateTrafficLightsBatch(Updates)
+    v
+[受信アクター / 受信サブシステム]  ← ユーザーがBPまたはC++で自由に実装
+    |
+    | UTrafficLightSubsystem::UpdateTrafficLightById(Id, State)
+    | UTrafficLightSubsystem::UpdateTrafficLightsBatch(Updates)
     v
 +------------------------------------------+
-| ATrafficLightHandlerBase                 |
+| UTrafficLightSubsystem (WorldSubsystem)  |
 |                                          |
 |  StateCache: TMap<int32, State>          |
 |  OnTrafficLightStateUpdated: Delegate    |
@@ -33,7 +36,10 @@ ASAM OSI (Open Simulation Interface) 仕様に基づく信号機の状態管理�
 +-------------------+  +-------------------+  +-------------------+
 ```
 
-**設計のポイント**: ハンドラーはアクターの参照を一切持たない。状態管理とイベントブロードキャストのみに特化し、アクター側が自分でデリゲートにBindする（Observer pattern）。
+**設計のポイント**:
+- Subsystemはアクターの参照を一切持たない。状態管理とイベントブロードキャストのみに特化し、アクター側が自分でデリゲートにBindする（Observer pattern）。
+- `UWorldSubsystem` のため、すべてのActorの `BeginPlay` より前に初期化される（順序保証）。
+- レベルへのアクター配置は不要。`GetWorld()->GetSubsystem<UTrafficLightSubsystem>()` でアクセス。
 
 ## ファイル構成
 
@@ -43,11 +49,11 @@ Source/OpenDRIVE/
     OsiTrafficLightTypes.h         -- Enum 3種 + 構造体 2種（ヘッダのみ）
     BPI_TrafficLightUpdate.h       -- 信号機アクター側 Blueprint Interface
     BPI_TrafficLightHandlerUpdate.h -- ハンドラー側 Blueprint Interface
-    TrafficLightHandlerBase.h      -- ハンドラーベースクラス
+    TrafficLightSubsystem.h        -- WorldSubsystem（状態キャッシュ + ブロードキャスト）
   Private/
     BPI_TrafficLightUpdate.cpp
     BPI_TrafficLightHandlerUpdate.cpp
-    TrafficLightHandlerBase.cpp
+    TrafficLightSubsystem.cpp
 ```
 
 ## 型定義 (OsiTrafficLightTypes.h)
@@ -87,16 +93,16 @@ Source/OpenDRIVE/
 
 ### BPI_TrafficLightHandlerUpdate（ハンドラー側）
 
-外部システムがハンドラーに状態を渡すためのインターフェース。
+外部システムがSubsystemに状態を渡すためのインターフェース。
 
 | メソッド | 説明 |
 |----------|------|
 | `UpdateTrafficLightById(int32 Id, FOsiTrafficLightState State)` | 1つの信号を更新 |
 | `UpdateTrafficLightsBatch(TArray<FOsiTrafficLightBatchEntry> Updates)` | 複数信号を一括更新 |
 
-## TrafficLightHandlerBase
+## UTrafficLightSubsystem
 
-状態キャッシュ + デリゲートブロードキャストを行うアクター。
+状態キャッシュ + デリゲートブロードキャストを行うWorldSubsystem。
 
 | メンバ | 型 | 説明 |
 |--------|----|------|
@@ -104,7 +110,10 @@ Source/OpenDRIVE/
 | `GetTrafficLightState()` | `bool(int32, FOsiTrafficLightState&)` | キャッシュから現在状態を取得 |
 | `StateCache` | `TMap<int32, FOsiTrafficLightState>` | 各IDの最新状態を保持 |
 
-`Blueprintable` のため、BP子クラスを作成してカスタマイズ可能。
+`UWorldSubsystem` のため:
+- すべてのActorの `BeginPlay` より前に `Initialize()` が実行される
+- レベルへのアクター配置は不要
+- `GetWorld()->GetSubsystem<UTrafficLightSubsystem>()` でアクセス
 
 ---
 
@@ -143,11 +152,10 @@ My Blueprint パネル → Variables で以下を追加:
 | 変数名 | 型 | デフォルト | 設定 |
 |--------|----|-----------|------|
 | `MyTrafficLightId` | Integer | 0 | `Instance Editable` をON（目のアイコン） |
-| `HandlerRef` | `Traffic Light Handler Base` (Object Reference) | なし | 内部用 |
 
 `MyTrafficLightId` を `Instance Editable` にすることで、レベルに配置した各インスタンスごとに異なるIDをDetailsパネルから設定できる。
 
-#### Step 4: BeginPlay でハンドラーを探してデリゲートにBind
+#### Step 4: BeginPlay でSubsystemを取得してデリゲートにBind
 
 Event Graph:
 
@@ -155,23 +163,16 @@ Event Graph:
 Event BeginPlay
     |
     v
-[Get All Actors Of Class]
-  Actor Class: TrafficLightHandlerBase
+[Get World Subsystem]
+  Class: TrafficLightSubsystem
     |
-    Out Actors (配列) ──→ [Get (index 0)] ──→ [Cast To TrafficLightHandlerBase]
-                                                  |
-                                                  v (As Traffic Light Handler Base)
-                                            [Set HandlerRef] ← 変数に保存
-                                                  |
-                                                  v
-                                            [Bind Event to OnTrafficLightStateUpdated]
-                                              Target: HandlerRef
-                                              Event: ──→ [Create Event] ──→ "OnStateReceived" (カスタムイベントを作成)
+    v (TrafficLightSubsystem reference)
+[Bind Event to OnTrafficLightStateUpdated]
+  Event: ──→ [Create Event] ──→ "OnStateReceived" (カスタムイベントを作成)
 ```
 
-
 **Bind Event の手順:**
-1. `HandlerRef` をドラッグ → `Bind Event to On Traffic Light State Updated` を選択
+1. `Get World Subsystem` ノードの出力ピンからドラッグ → `Bind Event to On Traffic Light State Updated` を選択
 2. `Event` ピンから線を引いて `Create Event` を選択
 3. `Select Function` で `Create a matching function` を選択
    → 自動的に `TrafficLightId (int32)` と `NewState (FOsiTrafficLightState)` のパラメータを持つカスタムイベントが作成される
@@ -238,10 +239,11 @@ Event OnTrafficLightUpdate (NewState: FOsiTrafficLightState)
 
 #### Step 7: レベルへの配置
 
-1. `TrafficLightHandlerBase` をレベルに1つ配置
-2. `BP_OsiTrafficLight` をレベルに必要数配置
-3. 各インスタンスの Details パネルで `My Traffic Light Id` にユニークなIDを設定
+1. `BP_OsiTrafficLight` をレベルに必要数配置
+2. 各インスタンスの Details パネルで `My Traffic Light Id` にユニークなIDを設定
    - 例: 交差点の北側 = 1, 南側 = 2, 東側 = 3, 西側 = 4
+
+※ Subsystemの配置は不要（自動で生成される）
 
 #### 全体のノードフロー図
 
@@ -249,10 +251,7 @@ Event OnTrafficLightUpdate (NewState: FOsiTrafficLightState)
 === BeginPlay ===
 
 Event BeginPlay
-  → Get All Actors Of Class (TrafficLightHandlerBase)
-  → Get [0]
-  → Cast To TrafficLightHandlerBase
-  → SET HandlerRef
+  → Get World Subsystem (TrafficLightSubsystem)
   → Bind Event to OnTrafficLightStateUpdated
       → Custom Event "OnStateReceived"
 
@@ -287,16 +286,20 @@ public:
     virtual void BeginPlay() override
     {
         Super::BeginPlay();
-        // ハンドラーを探してデリゲートにBind
-        TArray<AActor*> Handlers;
-        UGameplayStatics::GetAllActorsOfClass(
-            GetWorld(), ATrafficLightHandlerBase::StaticClass(), Handlers);
-        if (Handlers.Num() > 0)
+        // Subsystemは必ず存在する（BeginPlayより前に初期化済み）
+        UTrafficLightSubsystem* Subsystem = GetWorld()->GetSubsystem<UTrafficLightSubsystem>();
+        Subsystem->OnTrafficLightStateUpdated.AddDynamic(
+            this, &AMyTrafficLight::OnStateUpdated);
+    }
+
+    virtual void EndPlay(const EEndPlayReason::Type Reason) override
+    {
+        if (UTrafficLightSubsystem* Subsystem = GetWorld()->GetSubsystem<UTrafficLightSubsystem>())
         {
-            auto* Handler = Cast<ATrafficLightHandlerBase>(Handlers[0]);
-            Handler->OnTrafficLightStateUpdated.AddDynamic(
+            Subsystem->OnTrafficLightStateUpdated.RemoveDynamic(
                 this, &AMyTrafficLight::OnStateUpdated);
         }
+        Super::EndPlay(Reason);
     }
 
     UFUNCTION()
@@ -318,9 +321,12 @@ public:
 
 ### 3. 外部システムからの状態送信
 
+外部システム（gRPC受信アクター、esminiブリッジ等）からSubsystemに状態を送信する。
+受信ロジックはユーザーがBlueprintまたはC++で自由に実装できる。
+
 ```cpp
-// ハンドラーを取得
-auto* Handler = Cast<ATrafficLightHandlerBase>(HandlerActor);
+// Subsystemを取得
+UTrafficLightSubsystem* Subsystem = GetWorld()->GetSubsystem<UTrafficLightSubsystem>();
 
 // 個別更新
 FOsiTrafficLightState State;
@@ -328,21 +334,25 @@ State.Color = EOsiTrafficLightColor::RED;
 State.Icon = EOsiTrafficLightIcon::NONE;
 State.Mode = EOsiTrafficLightMode::CONSTANT;
 IBPI_TrafficLightHandlerUpdate::Execute_UpdateTrafficLightById(
-    Handler, /*TrafficLightId=*/ 1, State);
+    Subsystem, /*TrafficLightId=*/ 1, State);
 
 // バッチ更新
 TArray<FOsiTrafficLightBatchEntry> Updates;
 Updates.Add({1, {EOsiTrafficLightColor::RED,   EOsiTrafficLightIcon::NONE, EOsiTrafficLightMode::CONSTANT, 0.f}});
 Updates.Add({2, {EOsiTrafficLightColor::GREEN, EOsiTrafficLightIcon::NONE, EOsiTrafficLightMode::CONSTANT, 0.f}});
 IBPI_TrafficLightHandlerUpdate::Execute_UpdateTrafficLightsBatch(
-    Handler, Updates);
+    Subsystem, Updates);
+
+// または直接呼び出し（インターフェースを介さない場合）:
+Subsystem->UpdateTrafficLightById(1, State);
 ```
 
 ### 4. レベル配置
 
-1. `TrafficLightHandlerBase`（またはBP子クラス）をレベルに1つ配置
-2. 信号機BPアクターをレベルに配置し、各インスタンスの `MyTrafficLightId` を設定
-3. 外部システムが `BPI_TrafficLightHandlerUpdate` 経由でハンドラーに状態を送信
+1. 信号機BPアクターをレベルに配置し、各インスタンスの `MyTrafficLightId` を設定
+2. 外部システム（受信アクター等）がSubsystemに状態を送信
+
+※ Subsystemはレベルへの配置不要（`UWorldSubsystem` として自動生成される）
 
 ## 既存システムとの関係
 
@@ -350,8 +360,9 @@ IBPI_TrafficLightHandlerUpdate::Execute_UpdateTrafficLightsBatch(
 |------|------------|---------------------|
 | 状態モデル | `ETrafficLightState` (4値) | `FOsiTrafficLightState` (Color+Icon+Mode+Counter) |
 | 更新方式 | タイマー駆動（Tick） | イベント駆動（Push + Delegate） |
-| コントローラ | `ATrafficLightController` | `ATrafficLightHandlerBase` |
+| コントローラ | `ATrafficLightController` | `UTrafficLightSubsystem` (WorldSubsystem) |
 | アクター結合 | 直接参照 (`ATrafficLight*`) | 参照なし（Delegate broadcast） |
+| 初期化 | BeginPlayで相互参照 | Subsystemが先に初期化（順序保証） |
 
 既存の `ATrafficLight` を拡張して `BPI_TrafficLightUpdate` を実装すれば、両システムを共存させることも可能。
 

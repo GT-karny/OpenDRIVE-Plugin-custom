@@ -3,10 +3,10 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
+#include "Subsystems/WorldSubsystem.h"
 #include "OsiTrafficLightTypes.h"
 #include "BPI_TrafficLightHandlerUpdate.h"
-#include "TrafficLightHandlerBase.generated.h"
+#include "TrafficLightSubsystem.generated.h"
 
 /**
  * Broadcast when a traffic light state is updated.
@@ -18,26 +18,32 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
 	const FOsiTrafficLightState&, NewState);
 
 /**
- * Base handler actor for managing OSI traffic light state.
+ * World subsystem for managing OSI traffic light state.
  *
  * Manages a state cache and broadcasts updates via delegate.
  * Does NOT hold references to traffic light actors — actors bind to
  * OnTrafficLightStateUpdated and filter by their own ID.
  *
+ * Guaranteed to be initialized before any Actor's BeginPlay.
+ *
  * Usage:
- * 1. Place this actor (or a Blueprint subclass) in the level
- * 2. Traffic light actors bind to OnTrafficLightStateUpdated in BeginPlay
- * 3. External systems call UpdateTrafficLightById() / UpdateTrafficLightsBatch()
- *    through the BPI_TrafficLightHandlerUpdate interface
+ * 1. Traffic light actors bind to OnTrafficLightStateUpdated in BeginPlay
+ *    via GetWorld()->GetSubsystem<UTrafficLightSubsystem>()
+ * 2. External systems (receiver actors, co-sim bridges) call
+ *    UpdateTrafficLightById() / UpdateTrafficLightsBatch()
+ *    through the BPI_TrafficLightHandlerUpdate interface or directly
  */
-UCLASS(Blueprintable)
-class OPENDRIVE_API ATrafficLightHandlerBase : public AActor,
+UCLASS()
+class OPENDRIVE_API UTrafficLightSubsystem : public UWorldSubsystem,
 	public IBPI_TrafficLightHandlerUpdate
 {
 	GENERATED_BODY()
 
 public:
-	ATrafficLightHandlerBase();
+	// --- USubsystem interface ---
+	virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
+	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+	virtual void Deinitialize() override;
 
 	/**
 	 * Broadcast when any traffic light state is updated.
@@ -62,6 +68,6 @@ public:
 
 private:
 	/** ID -> current state cache */
-	UPROPERTY(VisibleAnywhere, Category = "OSI Traffic Light|Handler")
+	UPROPERTY()
 	TMap<int32, FOsiTrafficLightState> StateCache;
 };
