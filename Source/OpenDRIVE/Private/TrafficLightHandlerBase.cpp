@@ -7,94 +7,71 @@ ATrafficLightHandlerBase::ATrafficLightHandlerBase()
 	PrimaryActorTick.bCanEverTick = false;
 }
 
-void ATrafficLightHandlerBase::BeginPlay()
+bool ATrafficLightHandlerBase::RegisterTrafficLight_Implementation(int32 TrafficLightId, AActor* TrafficLightActor)
 {
-	Super::BeginPlay();
-	RebuildLookupMap();
-}
-
-void ATrafficLightHandlerBase::RebuildLookupMap()
-{
-	IdToIndexMap.Empty(ManagedTrafficLights.Num());
-	for (int32 i = 0; i < ManagedTrafficLights.Num(); ++i)
-	{
-		IdToIndexMap.Add(ManagedTrafficLights[i].TrafficLightId, i);
-	}
-}
-
-bool ATrafficLightHandlerBase::RegisterTrafficLight(int32 TrafficLightId, AActor* Actor)
-{
-	if (!IsValid(Actor))
+	if (!IsValid(TrafficLightActor))
 	{
 		return false;
 	}
 
-	if (IdToIndexMap.Contains(TrafficLightId))
+	if (ManagedTrafficLights.Contains(TrafficLightId))
 	{
 		return false;
 	}
 
-	FManagedTrafficLight Entry;
-	Entry.TrafficLightId = TrafficLightId;
-	Entry.TrafficLightActor = Actor;
-	const int32 NewIndex = ManagedTrafficLights.Add(Entry);
-	IdToIndexMap.Add(TrafficLightId, NewIndex);
+	ManagedTrafficLights.Add(TrafficLightId, TrafficLightActor);
 	return true;
 }
 
-bool ATrafficLightHandlerBase::UnregisterTrafficLight(int32 TrafficLightId)
+bool ATrafficLightHandlerBase::UnregisterTrafficLight_Implementation(int32 TrafficLightId)
 {
-	const int32* IndexPtr = IdToIndexMap.Find(TrafficLightId);
-	if (!IndexPtr)
+	if (ManagedTrafficLights.Remove(TrafficLightId) > 0)
 	{
-		return false;
+		StateCache.Remove(TrafficLightId);
+		return true;
 	}
-
-	ManagedTrafficLights.RemoveAt(*IndexPtr);
-	RebuildLookupMap();
-	return true;
+	return false;
 }
 
 bool ATrafficLightHandlerBase::GetTrafficLightState(int32 TrafficLightId, FOsiTrafficLightState& OutState) const
 {
-	const int32* IndexPtr = IdToIndexMap.Find(TrafficLightId);
-	if (!IndexPtr || !ManagedTrafficLights.IsValidIndex(*IndexPtr))
+	const FOsiTrafficLightState* Found = StateCache.Find(TrafficLightId);
+	if (!Found)
 	{
 		return false;
 	}
 
-	OutState = ManagedTrafficLights[*IndexPtr].CurrentState;
+	OutState = *Found;
 	return true;
 }
 
 void ATrafficLightHandlerBase::UpdateTrafficLightById_Implementation(int32 TrafficLightId, const FOsiTrafficLightState& NewState)
 {
-	int32* IndexPtr = IdToIndexMap.Find(TrafficLightId);
-	if (!IndexPtr || !ManagedTrafficLights.IsValidIndex(*IndexPtr))
+	AActor** ActorPtr = ManagedTrafficLights.Find(TrafficLightId);
+	if (!ActorPtr)
 	{
 		return;
 	}
 
-	PropagateStateToActor(ManagedTrafficLights[*IndexPtr], NewState);
+	PropagateStateToActor(TrafficLightId, *ActorPtr, NewState);
 }
 
 void ATrafficLightHandlerBase::UpdateTrafficLightsBatch_Implementation(const TArray<FOsiTrafficLightBatchEntry>& Updates)
 {
 	for (const FOsiTrafficLightBatchEntry& Update : Updates)
 	{
-		int32* IndexPtr = IdToIndexMap.Find(Update.TrafficLightId);
-		if (IndexPtr && ManagedTrafficLights.IsValidIndex(*IndexPtr))
+		AActor** ActorPtr = ManagedTrafficLights.Find(Update.TrafficLightId);
+		if (ActorPtr)
 		{
-			PropagateStateToActor(ManagedTrafficLights[*IndexPtr], Update.State);
+			PropagateStateToActor(Update.TrafficLightId, *ActorPtr, Update.State);
 		}
 	}
 }
 
-void ATrafficLightHandlerBase::PropagateStateToActor(FManagedTrafficLight& Entry, const FOsiTrafficLightState& NewState)
+void ATrafficLightHandlerBase::PropagateStateToActor(int32 TrafficLightId, AActor* Actor, const FOsiTrafficLightState& NewState)
 {
-	Entry.CurrentState = NewState;
+	StateCache.Add(TrafficLightId, NewState);
 
-	AActor* Actor = Entry.TrafficLightActor;
 	if (IsValid(Actor) && Actor->GetClass()->ImplementsInterface(UBPI_TrafficLightUpdate::StaticClass()))
 	{
 		IBPI_TrafficLightUpdate::Execute_OnTrafficLightUpdate(Actor, NewState);
