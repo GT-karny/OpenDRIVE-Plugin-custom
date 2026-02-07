@@ -7,9 +7,9 @@ ATrafficLightHandlerBase::ATrafficLightHandlerBase()
 	PrimaryActorTick.bCanEverTick = false;
 }
 
-bool ATrafficLightHandlerBase::RegisterTrafficLight_Implementation(int32 TrafficLightId, AActor* TrafficLightActor)
+bool ATrafficLightHandlerBase::RegisterTrafficLight_Implementation(int32 TrafficLightId, const TScriptInterface<IBPI_TrafficLightUpdate>& TrafficLightActor)
 {
-	if (!IsValid(TrafficLightActor))
+	if (!IsValid(TrafficLightActor.GetObject()))
 	{
 		return false;
 	}
@@ -47,7 +47,7 @@ bool ATrafficLightHandlerBase::GetTrafficLightState(int32 TrafficLightId, FOsiTr
 
 void ATrafficLightHandlerBase::UpdateTrafficLightById_Implementation(int32 TrafficLightId, const FOsiTrafficLightState& NewState)
 {
-	AActor** ActorPtr = ManagedTrafficLights.Find(TrafficLightId);
+	const TScriptInterface<IBPI_TrafficLightUpdate>* ActorPtr = ManagedTrafficLights.Find(TrafficLightId);
 	if (!ActorPtr)
 	{
 		return;
@@ -60,7 +60,7 @@ void ATrafficLightHandlerBase::UpdateTrafficLightsBatch_Implementation(const TAr
 {
 	for (const FOsiTrafficLightBatchEntry& Update : Updates)
 	{
-		AActor** ActorPtr = ManagedTrafficLights.Find(Update.TrafficLightId);
+		const TScriptInterface<IBPI_TrafficLightUpdate>* ActorPtr = ManagedTrafficLights.Find(Update.TrafficLightId);
 		if (ActorPtr)
 		{
 			PropagateStateToActor(Update.TrafficLightId, *ActorPtr, Update.State);
@@ -68,12 +68,13 @@ void ATrafficLightHandlerBase::UpdateTrafficLightsBatch_Implementation(const TAr
 	}
 }
 
-void ATrafficLightHandlerBase::PropagateStateToActor(int32 TrafficLightId, AActor* Actor, const FOsiTrafficLightState& NewState)
+void ATrafficLightHandlerBase::PropagateStateToActor(int32 TrafficLightId, const TScriptInterface<IBPI_TrafficLightUpdate>& Actor, const FOsiTrafficLightState& NewState)
 {
 	StateCache.Add(TrafficLightId, NewState);
 
-	if (IsValid(Actor) && Actor->GetClass()->ImplementsInterface(UBPI_TrafficLightUpdate::StaticClass()))
+	UObject* Obj = Actor.GetObject();
+	if (IsValid(Obj))
 	{
-		IBPI_TrafficLightUpdate::Execute_OnTrafficLightUpdate(Actor, NewState);
+		IBPI_TrafficLightUpdate::Execute_OnTrafficLightUpdate(Obj, NewState);
 	}
 }

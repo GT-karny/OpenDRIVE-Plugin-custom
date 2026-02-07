@@ -13,13 +13,13 @@
 /**
  * Base handler actor for managing OSI traffic light actors.
  *
- * Holds a TMap of integer IDs to actors implementing BPI_TrafficLightUpdate.
+ * Holds a TMap of integer IDs to BPI_TrafficLightUpdate-implementing actors.
  * Implements BPI_TrafficLightHandlerUpdate for receiving state updates from external systems,
  * and BPI_TrafficLightRegister for registering/unregistering traffic light actors.
  *
  * Usage:
  * 1. Place this actor (or a Blueprint subclass) in the level
- * 2. Populate ManagedTrafficLights in the editor or via RegisterTrafficLight()
+ * 2. Register traffic lights via BPI_TrafficLightRegister interface
  * 3. External systems call UpdateTrafficLightById() / UpdateTrafficLightsBatch()
  *    through the BPI_TrafficLightHandlerUpdate interface
  */
@@ -34,8 +34,8 @@ public:
 	ATrafficLightHandlerBase();
 
 	/** ID -> BPI_TrafficLightUpdate implementing actor map */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OSI Traffic Light|Handler")
-	TMap<int32, AActor*> ManagedTrafficLights;
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "OSI Traffic Light|Handler")
+	TMap<int32, TScriptInterface<IBPI_TrafficLightUpdate>> ManagedTrafficLights;
 
 	/**
 	 * Get the current cached state of a traffic light by ID.
@@ -47,7 +47,7 @@ public:
 	bool GetTrafficLightState(int32 TrafficLightId, FOsiTrafficLightState& OutState) const;
 
 	// --- BPI_TrafficLightRegister implementation ---
-	virtual bool RegisterTrafficLight_Implementation(int32 TrafficLightId, AActor* TrafficLightActor) override;
+	virtual bool RegisterTrafficLight_Implementation(int32 TrafficLightId, const TScriptInterface<IBPI_TrafficLightUpdate>& TrafficLightActor) override;
 	virtual bool UnregisterTrafficLight_Implementation(int32 TrafficLightId) override;
 
 	// --- BPI_TrafficLightHandlerUpdate implementation ---
@@ -56,9 +56,9 @@ public:
 
 protected:
 	/** Propagate a state to a single actor via BPI_TrafficLightUpdate. */
-	void PropagateStateToActor(int32 TrafficLightId, AActor* Actor, const FOsiTrafficLightState& NewState);
+	void PropagateStateToActor(int32 TrafficLightId, const TScriptInterface<IBPI_TrafficLightUpdate>& Actor, const FOsiTrafficLightState& NewState);
 
 private:
-	/** Cached state per traffic light ID (transient, not serialized) */
+	/** Cached state per traffic light ID */
 	TMap<int32, FOsiTrafficLightState> StateCache;
 };
