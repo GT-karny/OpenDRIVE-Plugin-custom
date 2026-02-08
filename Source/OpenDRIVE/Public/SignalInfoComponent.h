@@ -17,7 +17,7 @@ public:
 	USignalInfoComponent();
 
 	/** Signal ID from OpenDRIVE */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Signal Info")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Signal Info")
 	int32 SignalId;
 
 	/** Road ID where signal is located */
