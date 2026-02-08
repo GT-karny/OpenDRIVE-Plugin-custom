@@ -91,6 +91,19 @@ struct FOsiTrafficLightState
 	/** Counter value. Unit depends on icon: seconds for COUNTDOWN_SECONDS, percent for COUNTDOWN_PERCENT. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OSI Traffic Light")
 	float Counter = 0.f;
+
+	bool operator==(const FOsiTrafficLightState& Other) const
+	{
+		return Color == Other.Color
+			&& Icon == Other.Icon
+			&& Mode == Other.Mode
+			&& FMath::IsNearlyEqual(Counter, Other.Counter);
+	}
+
+	bool operator!=(const FOsiTrafficLightState& Other) const
+	{
+		return !(*this == Other);
+	}
 };
 
 /**

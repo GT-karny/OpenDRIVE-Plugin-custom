@@ -2,6 +2,7 @@
 #include "RoadManager.hpp"
 #include "SignalInfoComponent.h"
 #include "SignalTypeMapping.h"
+#include "BPI_SignalAutoSetup.h"
 
 void FSignalGenerator::GenerateSignals(UWorld* World)
 {
@@ -132,6 +133,12 @@ void FSignalGenerator::GenerateSignals(UWorld* World)
 			InfoComp->Width = Signal->GetWidth();
 			InfoComp->RegisterComponent();
 			SignalActor->AddInstanceComponent(InfoComp);
+
+			// If the actor implements IBPI_SignalAutoSetup, auto-configure it
+			if (SignalActor->GetClass()->ImplementsInterface(UBPI_SignalAutoSetup::StaticClass()))
+			{
+				IBPI_SignalAutoSetup::Execute_OnSignalAutoPlaced(SignalActor, InfoComp);
+			}
 
 #if WITH_EDITOR
 			// Organize in editor folder
