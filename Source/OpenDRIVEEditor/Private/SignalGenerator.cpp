@@ -2,7 +2,6 @@
 #include "RoadManager.hpp"
 #include "SignalInfoComponent.h"
 #include "SignalTypeMapping.h"
-#include "BPI_SignalAutoSetup.h"
 
 void FSignalGenerator::GenerateSignals(UWorld* World)
 {
@@ -116,8 +115,15 @@ void FSignalGenerator::GenerateSignals(UWorld* World)
 			AActor* SignalActor = World->SpawnActor<AActor>(ActorClass, SpawnTransform, SpawnParams);
 			if (!SignalActor) continue;
 
-			// Add SignalInfoComponent and populate it
-			USignalInfoComponent* InfoComp = NewObject<USignalInfoComponent>(SignalActor, NAME_None, RF_Transactional);
+			// Populate SignalInfoComponent (reuse existing default subobject if present)
+			USignalInfoComponent* InfoComp = SignalActor->FindComponentByClass<USignalInfoComponent>();
+			bool bCreatedNew = false;
+			if (!InfoComp)
+			{
+				InfoComp = NewObject<USignalInfoComponent>(SignalActor, NAME_None, RF_Transactional);
+				bCreatedNew = true;
+			}
+
 			InfoComp->SignalId = Signal->GetId();
 			InfoComp->RoadId = RoadId;
 			InfoComp->S = Signal->GetS();
@@ -131,13 +137,11 @@ void FSignalGenerator::GenerateSignals(UWorld* World)
 			InfoComp->bIsDynamic = Signal->IsDynamic();
 			InfoComp->Height = Signal->GetHeight();
 			InfoComp->Width = Signal->GetWidth();
-			InfoComp->RegisterComponent();
-			SignalActor->AddInstanceComponent(InfoComp);
 
-			// If the actor implements IBPI_SignalAutoSetup, auto-configure it
-			if (SignalActor->GetClass()->ImplementsInterface(UBPI_SignalAutoSetup::StaticClass()))
+			if (bCreatedNew)
 			{
-				IBPI_SignalAutoSetup::Execute_OnSignalAutoPlaced(SignalActor, InfoComp);
+				InfoComp->RegisterComponent();
+				SignalActor->AddInstanceComponent(InfoComp);
 			}
 
 #if WITH_EDITOR

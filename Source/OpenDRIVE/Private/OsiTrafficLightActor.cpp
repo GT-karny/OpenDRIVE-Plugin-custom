@@ -2,7 +2,6 @@
 
 #include "OsiTrafficLightActor.h"
 #include "TrafficLightSubsystem.h"
-#include "SignalInfoComponent.h"
 
 AOsiTrafficLightActor::AOsiTrafficLightActor()
 {
@@ -10,6 +9,8 @@ AOsiTrafficLightActor::AOsiTrafficLightActor()
 
 	USceneComponent* Scene = CreateDefaultSubobject<USceneComponent>(TEXT("Root"));
 	SetRootComponent(Scene);
+
+	SignalInfo = CreateDefaultSubobject<USignalInfoComponent>(TEXT("SignalInfo"));
 }
 
 void AOsiTrafficLightActor::BeginPlay()
@@ -37,7 +38,7 @@ void AOsiTrafficLightActor::EndPlay(const EEndPlayReason::Type Reason)
 
 void AOsiTrafficLightActor::OnSubsystemStateUpdated(int32 TrafficLightId, const FOsiTrafficLightState& NewState)
 {
-	if (TrafficLightId != MyTrafficLightId)
+	if (!SignalInfo || TrafficLightId != SignalInfo->SignalId)
 	{
 		return;
 	}
@@ -48,12 +49,4 @@ void AOsiTrafficLightActor::OnSubsystemStateUpdated(int32 TrafficLightId, const 
 void AOsiTrafficLightActor::OnTrafficLightUpdate_Implementation(const FOsiTrafficLightState& NewState)
 {
 	// Default: no-op. Override in Blueprint or C++ subclass.
-}
-
-void AOsiTrafficLightActor::OnSignalAutoPlaced_Implementation(const USignalInfoComponent* SignalInfo)
-{
-	if (SignalInfo)
-	{
-		MyTrafficLightId = SignalInfo->SignalId;
-	}
 }
