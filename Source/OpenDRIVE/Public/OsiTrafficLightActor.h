@@ -5,7 +5,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "BPI_TrafficLightUpdate.h"
-#include "BPI_SignalAutoSetup.h"
+#include "SignalInfoComponent.h"
 #include "OsiTrafficLightTypes.h"
 #include "OsiTrafficLightActor.generated.h"
 
@@ -16,24 +16,27 @@
  * ID filtering. Subclasses (Blueprint or C++) only need to override
  * OnTrafficLightUpdate to implement the visual response.
  *
+ * Includes a default USignalInfoComponent whose SignalId is used for
+ * delegate filtering. FSignalGenerator populates it automatically;
+ * for manual placement, set SignalId in the Details panel.
+ *
  * Usage:
  * 1. Create a Blueprint subclass of this actor
  * 2. Override OnTrafficLightUpdate in the Event Graph
- * 3. Place instances in the level and set MyTrafficLightId per instance
+ * 3. Place instances in the level and set SignalInfo > SignalId per instance
  */
 UCLASS(Blueprintable)
 class OPENDRIVE_API AOsiTrafficLightActor : public AActor,
-	public IBPI_TrafficLightUpdate,
-	public IBPI_SignalAutoSetup
+	public IBPI_TrafficLightUpdate
 {
 	GENERATED_BODY()
 
 public:
 	AOsiTrafficLightActor();
 
-	/** Traffic light ID. Set per instance in the Details panel. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OSI Traffic Light")
-	int32 MyTrafficLightId = 0;
+	/** Signal metadata (includes SignalId for filtering). Default subobject. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "OSI Traffic Light")
+	TObjectPtr<USignalInfoComponent> SignalInfo;
 
 protected:
 	virtual void BeginPlay() override;
@@ -47,12 +50,8 @@ protected:
 	virtual void OnTrafficLightUpdate_Implementation(
 		const FOsiTrafficLightState& NewState) override;
 
-	/** Called by FSignalGenerator after auto-placement. Sets MyTrafficLightId from SignalInfo. */
-	virtual void OnSignalAutoPlaced_Implementation(
-		const USignalInfoComponent* SignalInfo) override;
-
 private:
-	/** Delegate callback bound to UTrafficLightSubsystem. Filters by ID. */
+	/** Delegate callback bound to UTrafficLightSubsystem. Filters by SignalInfo->SignalId. */
 	UFUNCTION()
 	void OnSubsystemStateUpdated(int32 TrafficLightId, const FOsiTrafficLightState& NewState);
 };

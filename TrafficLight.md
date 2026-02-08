@@ -29,17 +29,18 @@ ASAM OSI (Open Simulation Interface) 仕様に基づく信号機の状態管理�
     |
     | Delegate broadcast
     v
-+-------------------+  +-------------------+  +-------------------+
-| Traffic Light A   |  | Traffic Light B   |  | Traffic Light C   |
-| MyId = 1          |  | MyId = 2          |  | MyId = 3          |
-| Id==MyId? -> 処理 |  | Id==MyId? -> 処理 |  | Id==MyId? -> 処理 |
-+-------------------+  +-------------------+  +-------------------+
++------------------------+  +------------------------+  +------------------------+
+| Traffic Light A        |  | Traffic Light B        |  | Traffic Light C        |
+| SignalInfo.SignalId = 1 |  | SignalInfo.SignalId = 2 |  | SignalInfo.SignalId = 3 |
+| Id==SignalId? -> 処理   |  | Id==SignalId? -> 処理   |  | Id==SignalId? -> 処理   |
++------------------------+  +------------------------+  +------------------------+
 ```
 
 **設計のポイント**:
 - Subsystemはアクターの参照を一切持たない。状態管理とイベントブロードキャストのみに特化し、アクター側が自分でデリゲートにBindする（Observer pattern）。
 - `UWorldSubsystem` のため、すべてのActorの `BeginPlay` より前に初期化される（順序保証）。
 - レベルへのアクター配置は不要。`GetWorld()->GetSubsystem<UTrafficLightSubsystem>()` でアクセス。
+- IDフィルタリングは `USignalInfoComponent::SignalId` を直接参照。自動配置時は `FSignalGenerator` が設定し、手動配置時はDetailsパネルから編集可能。
 
 ## ファイル構成
 
@@ -49,14 +50,14 @@ Source/OpenDRIVE/
     OsiTrafficLightTypes.h         -- Enum 3種 + 構造体 2種（ヘッダのみ）
     BPI_TrafficLightUpdate.h       -- 信号機アクター側 Blueprint Interface
     BPI_TrafficLightHandlerUpdate.h -- ハンドラー側 Blueprint Interface
-    BPI_SignalAutoSetup.h          -- 自動配置インターフェース
+    SignalInfoComponent.h          -- 信号メタデータコンポーネント
     TrafficLightSubsystem.h        -- WorldSubsystem（状態キャッシュ + ブロードキャスト）
     OsiTrafficLightActor.h         -- Blueprintable ベースクラス（サンプル）
     OsiTrafficLightActorCached.h   -- 状態キャッシュ付きサブクラス（サンプル）
   Private/
     BPI_TrafficLightUpdate.cpp
     BPI_TrafficLightHandlerUpdate.cpp
-    BPI_SignalAutoSetup.cpp
+    SignalInfoComponent.cpp
     TrafficLightSubsystem.cpp
     OsiTrafficLightActor.cpp
     OsiTrafficLightActorCached.cpp
@@ -106,17 +107,20 @@ Source/OpenDRIVE/
 | `UpdateTrafficLightById(int32 Id, FOsiTrafficLightState State)` | 1つの信号を更新 |
 | `UpdateTrafficLightsBatch(TArray<FOsiTrafficLightBatchEntry> Updates)` | 複数信号を一括更新 |
 
-### BPI_SignalAutoSetup（自動配置）
+## USignalInfoComponent
 
-エディタの `FSignalGenerator` がアクターを自動配置した後に呼ばれるインターフェース。
-実装すると、OpenDRIVEの信号情報（`USignalInfoComponent`）から自動的にプロパティを設定できる。
+OpenDRIVE信号メタデータを保持するコンポーネント。`AOsiTrafficLightActor` にはデフォルトサブオブジェクトとして含まれる。
 
-| メソッド | 説明 |
-|----------|------|
-| `OnSignalAutoPlaced(USignalInfoComponent* SignalInfo)` | 自動配置後に呼ばれる。SignalInfoからID等を取得して設定 |
+| プロパティ | 型 | 説明 |
+|-----------|-----|------|
+| `SignalId` | `int32` | 信号ID（IDフィルタリングに使用。EditAnywhere） |
+| `RoadId` | `int32` | 道路ID |
+| `Type` / `SubType` | `FString` | 信号の種類・サブタイプ |
+| `Country` | `FString` | 国コード（"DEU", "JPN" 等） |
+| その他 | | S, T, Value, Unit, Text, bIsDynamic, Height, Width |
 
-`AOsiTrafficLightActor` はデフォルトで `MyTrafficLightId = SignalInfo->SignalId` を設定する。
-BPサブクラスでオーバーライドすれば、追加のプロパティ設定も可能。
+`FSignalGenerator` による自動配置時は全プロパティが自動設定される。
+手動配置時は `SignalId` をDetailsパネルから編集する。
 
 ## UTrafficLightSubsystem
 
@@ -141,6 +145,7 @@ BPサブクラスでオーバーライドすれば、追加のプロパティ設
 
 `AOsiTrafficLightActor` は Subsystem へのバインド、IDフィルタリングまでをC++で実装したベースクラス。
 BPサブクラスを作成し、`OnTrafficLightUpdate` だけをオーバーライドすれば良い。
+デフォルトで `USignalInfoComponent` を持ち、`SignalId` によるフィルタリングが自動で行われる。
 
 #### Step 1: BPサブクラスの作成
 
@@ -156,6 +161,7 @@ Viewport/Components パネルで信号機の見た目を構成する:
 
 ```
 DefaultSceneRoot (Scene)  ← 親クラスで作成済み
+  +-- SignalInfo (SignalInfoComponent)  ← 親クラスで作成済み（IDフィルタリング用）
   +-- SignalMesh (Static Mesh)      -- 信号機本体のメッシュ
   +-- RedLight (Point Light)        -- 赤ライト
   +-- YellowLight (Point Light)     -- 黄ライト
@@ -201,7 +207,7 @@ Event OnTrafficLightUpdate (NewState: FOsiTrafficLightState)
 #### Step 4: レベルへの配置
 
 1. `BP_OsiTrafficLight` をレベルに必要数配置
-2. 各インスタンスの Details パネルで `My Traffic Light Id` にユニークなIDを設定
+2. 各インスタンスの Details パネルで `Signal Info > Signal Id` にユニークなIDを設定
    - 例: 交差点の北側 = 1, 南側 = 2, 東側 = 3, 西側 = 4
 
 ※ Subsystemの配置は不要（自動で生成される）
@@ -222,7 +228,12 @@ Event OnTrafficLightUpdate (NewState: FOsiTrafficLightState)
 4. Details パネル → `Interfaces` → `Add` → `BPI_TrafficLightUpdate` を検索して追加
 5. `Compile` をクリック → Interfaces セクションに `OnTrafficLightUpdate` イベントが表示される
 
-#### Step 2: 変数の追加
+#### Step 2: コンポーネントと変数の追加
+
+コンポーネント:
+- `SignalInfoComponent` を追加（`Signal Id` でフィルタリング）
+
+または変数:
 
 | 変数名 | 型 | デフォルト | 設定 |
 |--------|----|-----------|------|
@@ -249,7 +260,7 @@ Custom Event: OnStateReceived
   (TrafficLightId: int32, NewState: FOsiTrafficLightState)
     |
     v
-[Branch: TrafficLightId == MyTrafficLightId]
+[Branch: TrafficLightId == SignalInfo.SignalId]
     |-- True ──→ [OnTrafficLightUpdate(Self, NewState)]
     |-- False ──→ (何もしない)
 ```
@@ -307,51 +318,7 @@ class AMyTrafficLight : public AOsiTrafficLightActor
 ```
 
 BeginPlay/EndPlay でのSubsystemバインド、IDフィルタリングは親クラスで実装済み。
-
-ベースクラスを使わずフルスクラッチで実装する場合:
-
-```cpp
-UCLASS()
-class AMyTrafficLight : public AActor, public IBPI_TrafficLightUpdate
-{
-    GENERATED_BODY()
-
-public:
-    UPROPERTY(EditAnywhere, Category = "Traffic Light")
-    int32 MyTrafficLightId = 0;
-
-    virtual void BeginPlay() override
-    {
-        Super::BeginPlay();
-        UTrafficLightSubsystem* Subsystem = GetWorld()->GetSubsystem<UTrafficLightSubsystem>();
-        Subsystem->OnTrafficLightStateUpdated.AddDynamic(
-            this, &AMyTrafficLight::OnStateUpdated);
-    }
-
-    virtual void EndPlay(const EEndPlayReason::Type Reason) override
-    {
-        if (UTrafficLightSubsystem* Subsystem = GetWorld()->GetSubsystem<UTrafficLightSubsystem>())
-        {
-            Subsystem->OnTrafficLightStateUpdated.RemoveDynamic(
-                this, &AMyTrafficLight::OnStateUpdated);
-        }
-        Super::EndPlay(Reason);
-    }
-
-    UFUNCTION()
-    void OnStateUpdated(int32 TrafficLightId, const FOsiTrafficLightState& NewState)
-    {
-        if (TrafficLightId != MyTrafficLightId) return;
-        Execute_OnTrafficLightUpdate(this, NewState);
-    }
-
-    virtual void OnTrafficLightUpdate_Implementation(
-        const FOsiTrafficLightState& NewState) override
-    {
-        // ここで見た目を更新
-    }
-};
-```
+IDは `SignalInfo->SignalId` から自動的に読み取られる。
 
 ### 5. 外部システムからの状態送信
 
@@ -385,26 +352,23 @@ Subsystem->UpdateTrafficLightById(1, State);
 
 #### 手動配置
 
-1. 信号機BPアクターをレベルに配置し、各インスタンスの `MyTrafficLightId` を設定
+1. 信号機BPアクターをレベルに配置し、各インスタンスの `Signal Info > Signal Id` を設定
 2. 外部システム（受信アクター等）がSubsystemに状態を送信
 
 ※ Subsystemはレベルへの配置不要（`UWorldSubsystem` として自動生成される）
 
 #### エディタ自動配置（FSignalGenerator）
 
-OpenDRIVEファイルの信号データに基づいて `FSignalGenerator` がアクターを自動配置する場合、
-`IBPI_SignalAutoSetup` インターフェースを実装したアクターは `OnSignalAutoPlaced` が自動的に呼ばれる。
-
-`AOsiTrafficLightActor` を継承したBPサブクラスを `USignalTypeMapping` に登録しておけば、
-自動配置時に `MyTrafficLightId` が `SignalInfo->SignalId` から自動設定される。
+OpenDRIVEファイルの信号データに基づいて `FSignalGenerator` がアクターを自動配置する。
+`AOsiTrafficLightActor` のBPサブクラスを `USignalTypeMapping` に登録しておけば、
+自動配置時にデフォルトの `SignalInfoComponent` に全メタデータが自動設定される。
 
 ```
 FSignalGenerator::GenerateSignals()
   -> SpawnActor (SignalTypeMappingに基づく)
-  -> SignalInfoComponent を作成・添付 (SignalId, Type, etc.)
-  -> IBPI_SignalAutoSetup::Execute_OnSignalAutoPlaced(Actor, InfoComp)
-     -> AOsiTrafficLightActor::OnSignalAutoPlaced_Implementation()
-        -> MyTrafficLightId = SignalInfo->SignalId  // 自動設定
+  -> 既存の SignalInfoComponent を検索 (なければ新規作成)
+  -> SignalId, RoadId, Type, etc. を設定
+  -> アクターは BeginPlay で SignalInfo->SignalId を使ってフィルタリング
 ```
 
 ## 既存システムとの関係
