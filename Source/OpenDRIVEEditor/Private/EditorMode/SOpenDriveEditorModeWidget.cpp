@@ -563,23 +563,23 @@ FReply SOpenDRIVEEditorModeWidget::GenerateSignals()
 
 void SOpenDRIVEEditorModeWidget::OnGenerateSignalsCheckStateChanged(ECheckBoxState state)
 {
-	GetEdMode()->SetGenerateSignals(state == ECheckBoxState::Checked);
+	GetEdMode()->SignalGenerator.SetGenerateSignals(state == ECheckBoxState::Checked);
 }
 
 void SOpenDRIVEEditorModeWidget::OnFlipSignalOrientationCheckStateChanged(ECheckBoxState state)
 {
-	GetEdMode()->SetFlipSignalOrientation(state == ECheckBoxState::Checked);
+	GetEdMode()->SignalGenerator.SetFlipSignalOrientation(state == ECheckBoxState::Checked);
 }
 
 FString SOpenDRIVEEditorModeWidget::GetSignalMappingAssetPath() const
 {
-	USignalTypeMapping* Asset = GetEdMode()->GetSignalTypeMappingAsset();
+	USignalTypeMapping* Asset = GetEdMode()->SignalGenerator.GetSignalTypeMappingAsset();
 	return Asset ? Asset->GetPathName() : FString();
 }
 
 void SOpenDRIVEEditorModeWidget::OnSignalMappingAssetSelected(const FAssetData& AssetData)
 {
 	USignalTypeMapping* Asset = Cast<USignalTypeMapping>(AssetData.GetAsset());
-	GetEdMode()->SetSignalTypeMappingAsset(Asset);
+	GetEdMode()->SignalGenerator.SetSignalTypeMappingAsset(Asset);
 }
 
