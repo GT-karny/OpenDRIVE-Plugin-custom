@@ -49,11 +49,17 @@ Source/OpenDRIVE/
     OsiTrafficLightTypes.h         -- Enum 3種 + 構造体 2種（ヘッダのみ）
     BPI_TrafficLightUpdate.h       -- 信号機アクター側 Blueprint Interface
     BPI_TrafficLightHandlerUpdate.h -- ハンドラー側 Blueprint Interface
+    BPI_SignalAutoSetup.h          -- 自動配置インターフェース
     TrafficLightSubsystem.h        -- WorldSubsystem（状態キャッシュ + ブロードキャスト）
+    OsiTrafficLightActor.h         -- Blueprintable ベースクラス（サンプル）
+    OsiTrafficLightActorCached.h   -- 状態キャッシュ付きサブクラス（サンプル）
   Private/
     BPI_TrafficLightUpdate.cpp
     BPI_TrafficLightHandlerUpdate.cpp
+    BPI_SignalAutoSetup.cpp
     TrafficLightSubsystem.cpp
+    OsiTrafficLightActor.cpp
+    OsiTrafficLightActorCached.cpp
 ```
 
 ## 型定義 (OsiTrafficLightTypes.h)
@@ -100,6 +106,18 @@ Source/OpenDRIVE/
 | `UpdateTrafficLightById(int32 Id, FOsiTrafficLightState State)` | 1つの信号を更新 |
 | `UpdateTrafficLightsBatch(TArray<FOsiTrafficLightBatchEntry> Updates)` | 複数信号を一括更新 |
 
+### BPI_SignalAutoSetup（自動配置）
+
+エディタの `FSignalGenerator` がアクターを自動配置した後に呼ばれるインターフェース。
+実装すると、OpenDRIVEの信号情報（`USignalInfoComponent`）から自動的にプロパティを設定できる。
+
+| メソッド | 説明 |
+|----------|------|
+| `OnSignalAutoPlaced(USignalInfoComponent* SignalInfo)` | 自動配置後に呼ばれる。SignalInfoからID等を取得して設定 |
+
+`AOsiTrafficLightActor` はデフォルトで `MyTrafficLightId = SignalInfo->SignalId` を設定する。
+BPサブクラスでオーバーライドすれば、追加のプロパティ設定も可能。
+
 ## UTrafficLightSubsystem
 
 状態キャッシュ + デリゲートブロードキャストを行うWorldSubsystem。
@@ -119,24 +137,25 @@ Source/OpenDRIVE/
 
 ## 実装ガイド
 
-### 1. 信号機アクターの作成（Blueprint）
+### 1. 信号機アクターの作成（Blueprint — ベースクラス使用、推奨）
 
-信号機の見た目を持つBPアクターを作成し、状態変化に応じて表示を切り替える。
+`AOsiTrafficLightActor` は Subsystem へのバインド、IDフィルタリングまでをC++で実装したベースクラス。
+BPサブクラスを作成し、`OnTrafficLightUpdate` だけをオーバーライドすれば良い。
 
-#### Step 1: BPアクターの作成とインターフェース追加
+#### Step 1: BPサブクラスの作成
 
-1. Content Browser で右クリック → `Blueprint Class` → `Actor` を選択
+1. Content Browser で右クリック → `Blueprint Class` → `All Classes` → `OsiTrafficLightActor` を選択
 2. 名前を `BP_OsiTrafficLight` などにする
-3. BP を開き、`Class Settings` をクリック
-4. Details パネル → `Interfaces` → `Add` → `BPI_TrafficLightUpdate` を検索して追加
-5. `Compile` をクリック → Interfaces セクションに `OnTrafficLightUpdate` イベントが表示される
+3. `Compile` をクリック → Interfaces セクションに `OnTrafficLightUpdate` イベントが表示される
+
+※ `BPI_TrafficLightUpdate` インターフェースは親クラスに実装済みのため、手動で追加する必要はない。
 
 #### Step 2: コンポーネントの追加
 
 Viewport/Components パネルで信号機の見た目を構成する:
 
 ```
-DefaultSceneRoot (Scene)
+DefaultSceneRoot (Scene)  ← 親クラスで作成済み
   +-- SignalMesh (Static Mesh)      -- 信号機本体のメッシュ
   +-- RedLight (Point Light)        -- 赤ライト
   +-- YellowLight (Point Light)     -- 黄ライト
@@ -145,65 +164,7 @@ DefaultSceneRoot (Scene)
 
 ※ 構成は自由。上記は一例。
 
-#### Step 3: 変数の追加
-
-My Blueprint パネル → Variables で以下を追加:
-
-| 変数名 | 型 | デフォルト | 設定 |
-|--------|----|-----------|------|
-| `MyTrafficLightId` | Integer | 0 | `Instance Editable` をON（目のアイコン） |
-
-`MyTrafficLightId` を `Instance Editable` にすることで、レベルに配置した各インスタンスごとに異なるIDをDetailsパネルから設定できる。
-
-#### Step 4: BeginPlay でSubsystemを取得してデリゲートにBind
-
-Event Graph:
-
-```
-Event BeginPlay
-    |
-    v
-[Get World Subsystem]
-  Class: TrafficLightSubsystem
-    |
-    v (TrafficLightSubsystem reference)
-[Bind Event to OnTrafficLightStateUpdated]
-  Event: ──→ [Create Event] ──→ "OnStateReceived" (カスタムイベントを作成)
-```
-
-**Bind Event の手順:**
-1. `Get World Subsystem` ノードの出力ピンからドラッグ → `Bind Event to On Traffic Light State Updated` を選択
-2. `Event` ピンから線を引いて `Create Event` を選択
-3. `Select Function` で `Create a matching function` を選択
-   → 自動的に `TrafficLightId (int32)` と `NewState (FOsiTrafficLightState)` のパラメータを持つカスタムイベントが作成される
-
-※ または `Event` ピンからドラッグして `Add Custom Event...` でも可
-
-#### Step 5: コールバックでIDフィルタリング
-
-作成されたカスタムイベント（例: `OnStateReceived`）内:
-
-```
-Custom Event: OnStateReceived
-  (TrafficLightId: int32, NewState: FOsiTrafficLightState)
-    |
-    v
-[Equal (==)]  ← TrafficLightId と MyTrafficLightId を比較
-    |
-    v
-[Branch]
-    |
-    |-- True ──→ [OnTrafficLightUpdate] ← Interfaces セクションから呼び出し (Message)
-    |              Target: Self            NewState: NewState を接続
-    |
-    |-- False ──→ (何もしない)
-```
-
-**OnTrafficLightUpdate の呼び方:**
-- 右クリック → `Call Function` ではなく `Interfaces` → `BPI Traffic Light Update` → `On Traffic Light Update` (Message) を使う
-- または `Self` をドラッグ → `On Traffic Light Update` を検索
-
-#### Step 6: OnTrafficLightUpdate の実装
+#### Step 3: OnTrafficLightUpdate の実装
 
 My Blueprint パネル → Interfaces → `OnTrafficLightUpdate` をダブルクリック → Event Graph にイベントノードが追加される。
 
@@ -237,41 +198,117 @@ Event OnTrafficLightUpdate (NewState: FOsiTrafficLightState)
     |-- COUNTING ──→ Counter 値をテキストに表示
 ```
 
-#### Step 7: レベルへの配置
+#### Step 4: レベルへの配置
 
 1. `BP_OsiTrafficLight` をレベルに必要数配置
 2. 各インスタンスの Details パネルで `My Traffic Light Id` にユニークなIDを設定
    - 例: 交差点の北側 = 1, 南側 = 2, 東側 = 3, 西側 = 4
 
 ※ Subsystemの配置は不要（自動で生成される）
+※ BeginPlay でのSubsystem取得、デリゲートBind、IDフィルタリングはすべて親クラスで実装済み
 
-#### 全体のノードフロー図
+### 2. 信号機アクターの作成（Blueprint — フルスクラッチ）
+
+`AOsiTrafficLightActor` を使わず、すべてBPで構築する場合の手順。
+
+<details>
+<summary>フルスクラッチ手順（クリックで展開）</summary>
+
+#### Step 1: BPアクターの作成とインターフェース追加
+
+1. Content Browser で右クリック → `Blueprint Class` → `Actor` を選択
+2. 名前を `BP_OsiTrafficLight` などにする
+3. BP を開き、`Class Settings` をクリック
+4. Details パネル → `Interfaces` → `Add` → `BPI_TrafficLightUpdate` を検索して追加
+5. `Compile` をクリック → Interfaces セクションに `OnTrafficLightUpdate` イベントが表示される
+
+#### Step 2: 変数の追加
+
+| 変数名 | 型 | デフォルト | 設定 |
+|--------|----|-----------|------|
+| `MyTrafficLightId` | Integer | 0 | `Instance Editable` をON |
+
+#### Step 3: BeginPlay でSubsystemを取得してデリゲートにBind
 
 ```
-=== BeginPlay ===
-
 Event BeginPlay
-  → Get World Subsystem (TrafficLightSubsystem)
-  → Bind Event to OnTrafficLightStateUpdated
-      → Custom Event "OnStateReceived"
-
-=== OnStateReceived (デリゲートコールバック) ===
-
-OnStateReceived(TrafficLightId, NewState)
-  → TrafficLightId == MyTrafficLightId?
-  → Branch
-      True → OnTrafficLightUpdate(Self, NewState)
-
-=== OnTrafficLightUpdate (インターフェース実装) ===
-
-Event OnTrafficLightUpdate(NewState)
-  → Break FOsiTrafficLightState
-  → Switch on Color → ライト色切り替え
-  → Switch on Mode  → 点灯/点滅/OFF制御
-  → Switch on Icon  → 矢印表示切り替え（必要に応じて）
+    |
+    v
+[Get World Subsystem]
+  Class: TrafficLightSubsystem
+    |
+    v (TrafficLightSubsystem reference)
+[Bind Event to OnTrafficLightStateUpdated]
+  Event: ──→ [Create Event] ──→ "OnStateReceived"
 ```
 
-### 2. 信号機アクターの作成（C++）
+#### Step 4: コールバックでIDフィルタリング
+
+```
+Custom Event: OnStateReceived
+  (TrafficLightId: int32, NewState: FOsiTrafficLightState)
+    |
+    v
+[Branch: TrafficLightId == MyTrafficLightId]
+    |-- True ──→ [OnTrafficLightUpdate(Self, NewState)]
+    |-- False ──→ (何もしない)
+```
+
+#### Step 5: OnTrafficLightUpdate の実装
+
+（ベースクラス使用時の Step 3 と同じ）
+
+</details>
+
+### 3. 信号機アクターの作成（Blueprint — キャッシュ付き）
+
+`AOsiTrafficLightActorCached` は `AOsiTrafficLightActor` のサブクラスで、前回と同じ状態が送られてきた場合にスキップする。
+マテリアル切り替えやライト ON/OFF など、重い処理を毎フレーム呼ばれたくない場合に有用。
+
+#### 使い方
+
+1. Content Browser で右クリック → `Blueprint Class` → `All Classes` → `OsiTrafficLightActorCached` を選択
+2. `OnTrafficLightStateChanged` をオーバーライド（`OnTrafficLightUpdate` ではない点に注意）
+3. 状態が実際に変化したときだけ呼ばれるので、見た目の更新処理をここに書く
+4. `CachedState` 変数で現在の状態をBPから読み取り可能
+
+```
+Event OnTrafficLightStateChanged (NewState: FOsiTrafficLightState)
+    |
+    v
+[Break FOsiTrafficLightState] → Color, Icon, Mode, Counter
+    |
+    v
+[Switch on Color] → ライト切り替え
+```
+
+| クラス | 毎回呼ばれる | 変化時のみ | オーバーライド対象 |
+|--------|:---:|:---:|------------------|
+| `AOsiTrafficLightActor` | o | - | `OnTrafficLightUpdate` |
+| `AOsiTrafficLightActorCached` | - | o | `OnTrafficLightStateChanged` |
+
+### 4. 信号機アクターの作成（C++）
+
+`AOsiTrafficLightActor` を継承してC++で実装する場合:
+
+```cpp
+UCLASS()
+class AMyTrafficLight : public AOsiTrafficLightActor
+{
+    GENERATED_BODY()
+
+    virtual void OnTrafficLightUpdate_Implementation(
+        const FOsiTrafficLightState& NewState) override
+    {
+        // ここで見た目を更新
+        // NewState.Color, NewState.Icon, NewState.Mode, NewState.Counter
+    }
+};
+```
+
+BeginPlay/EndPlay でのSubsystemバインド、IDフィルタリングは親クラスで実装済み。
+
+ベースクラスを使わずフルスクラッチで実装する場合:
 
 ```cpp
 UCLASS()
@@ -286,7 +323,6 @@ public:
     virtual void BeginPlay() override
     {
         Super::BeginPlay();
-        // Subsystemは必ず存在する（BeginPlayより前に初期化済み）
         UTrafficLightSubsystem* Subsystem = GetWorld()->GetSubsystem<UTrafficLightSubsystem>();
         Subsystem->OnTrafficLightStateUpdated.AddDynamic(
             this, &AMyTrafficLight::OnStateUpdated);
@@ -306,20 +342,18 @@ public:
     void OnStateUpdated(int32 TrafficLightId, const FOsiTrafficLightState& NewState)
     {
         if (TrafficLightId != MyTrafficLightId) return;
-        // BPI_TrafficLightUpdate の実装を呼ぶ
-        OnTrafficLightUpdate(NewState);
+        Execute_OnTrafficLightUpdate(this, NewState);
     }
 
     virtual void OnTrafficLightUpdate_Implementation(
         const FOsiTrafficLightState& NewState) override
     {
         // ここで見た目を更新
-        // NewState.Color, NewState.Icon, NewState.Mode, NewState.Counter
     }
 };
 ```
 
-### 3. 外部システムからの状態送信
+### 5. 外部システムからの状態送信
 
 外部システム（gRPC受信アクター、esminiブリッジ等）からSubsystemに状態を送信する。
 受信ロジックはユーザーがBlueprintまたはC++で自由に実装できる。
@@ -347,12 +381,31 @@ IBPI_TrafficLightHandlerUpdate::Execute_UpdateTrafficLightsBatch(
 Subsystem->UpdateTrafficLightById(1, State);
 ```
 
-### 4. レベル配置
+### 6. レベル配置
+
+#### 手動配置
 
 1. 信号機BPアクターをレベルに配置し、各インスタンスの `MyTrafficLightId` を設定
 2. 外部システム（受信アクター等）がSubsystemに状態を送信
 
 ※ Subsystemはレベルへの配置不要（`UWorldSubsystem` として自動生成される）
+
+#### エディタ自動配置（FSignalGenerator）
+
+OpenDRIVEファイルの信号データに基づいて `FSignalGenerator` がアクターを自動配置する場合、
+`IBPI_SignalAutoSetup` インターフェースを実装したアクターは `OnSignalAutoPlaced` が自動的に呼ばれる。
+
+`AOsiTrafficLightActor` を継承したBPサブクラスを `USignalTypeMapping` に登録しておけば、
+自動配置時に `MyTrafficLightId` が `SignalInfo->SignalId` から自動設定される。
+
+```
+FSignalGenerator::GenerateSignals()
+  -> SpawnActor (SignalTypeMappingに基づく)
+  -> SignalInfoComponent を作成・添付 (SignalId, Type, etc.)
+  -> IBPI_SignalAutoSetup::Execute_OnSignalAutoPlaced(Actor, InfoComp)
+     -> AOsiTrafficLightActor::OnSignalAutoPlaced_Implementation()
+        -> MyTrafficLightId = SignalInfo->SignalId  // 自動設定
+```
 
 ## 既存システムとの関係
 
