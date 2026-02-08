@@ -14,5 +14,4 @@ public:
 
 private:
 	void* RoadManagerHandle = nullptr;
-	void* GT_esminiLibHandle = nullptr;
 };
