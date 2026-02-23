@@ -56,6 +56,11 @@ protected :
 	FReply GenerateLaneSplines();
 
 	/**
+	* Clears all previously generated spline actors.
+	*/
+	FReply ClearGeneratedSplines();
+
+	/**
 	* Link the Reset() function in the OpenDRIVEEditorMode.cpp file
 	*/
 	FReply Reset();

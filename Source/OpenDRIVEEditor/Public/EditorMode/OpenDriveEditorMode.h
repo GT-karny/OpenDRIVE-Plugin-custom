@@ -145,6 +145,7 @@ public :
 	FSignalGenerator SignalGenerator;
 
 	void GenerateSignals() { SignalGenerator.GenerateSignals(GetWorld()); }
+	void ClearGeneratedSplines() { SplineGenerator.ClearGeneratedSplines(); }
 	void ClearGeneratedSignals() { SignalGenerator.ClearGeneratedSignals(); }
 	FSignalGenerator& GetSignalGenerator() { return SignalGenerator; }
 
