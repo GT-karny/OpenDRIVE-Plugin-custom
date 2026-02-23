@@ -89,9 +89,30 @@ public:
 		bool bOther,
 		bool bReference);
 
-	/** If true, only generates the outermost driving lane per side. Default: false. */
+	/** If true, only generates the outermost driving lane per side. Default: false.
+	 *  (Backward-compatible; internally maps to SetLanePositionFilter(2).) */
 	UFUNCTION(BlueprintCallable, Category = "OpenDRIVE|Splines")
 	void SetGenerateOutermostDrivingLaneOnly(bool bOutermostOnly);
+
+	/** Enables/disables generation of left lanes (ID > 0). Default: true. */
+	UFUNCTION(BlueprintCallable, Category = "OpenDRIVE|Splines")
+	void SetGenerateLeftLanes(bool bGenerate);
+
+	/** Enables/disables generation of right lanes (ID < 0). Default: true. */
+	UFUNCTION(BlueprintCallable, Category = "OpenDRIVE|Splines")
+	void SetGenerateRightLanes(bool bGenerate);
+
+	/**
+	 * Sets the lane position filter mode.
+	 * 0 = All, 1 = Outermost Only (all types), 2 = Outermost Driving Only,
+	 * 3 = Innermost Only (all types), 4 = Innermost Driving Only, 5 = Specific Index
+	 */
+	UFUNCTION(BlueprintCallable, Category = "OpenDRIVE|Splines")
+	void SetLanePositionFilter(int32 FilterMode);
+
+	/** Sets the specific lane index (1-based from center). Only used when filter mode = 5. */
+	UFUNCTION(BlueprintCallable, Category = "OpenDRIVE|Splines")
+	void SetSpecificLaneIndex(int32 Index);
 
 	// ==========================================
 	// Signal Generation

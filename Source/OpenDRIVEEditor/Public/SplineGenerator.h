@@ -6,6 +6,17 @@ class FSplineGenerator
 {
 public:
 
+	// Lane position filter modes
+	enum class ELanePositionFilter : uint8
+	{
+		All = 0,                 // Generate all lanes
+		OutermostOnly = 1,       // Outermost lane per side (all lane types)
+		OutermostDrivingOnly = 2,// Outermost driving lane per side
+		InnermostOnly = 3,       // Innermost lane per side (all lane types)
+		InnermostDrivingOnly = 4,// Innermost driving lane per side
+		SpecificIndex = 5        // Specific lane index from center (all lane types)
+	};
+
 	/**
 	 * Generates lane spline actors from OpenDRIVE road data.
 	 * @param World The world to spawn actors in
@@ -39,6 +50,15 @@ public:
 	bool bGenerateJunctions = true;
 	void SetGenerateJunctions(bool Val) { bGenerateJunctions = Val; }
 	bool GetGenerateJunctions() const { return bGenerateJunctions; }
+
+	// Side filters
+	bool bGenerateLeftLanes = true;
+	void SetGenerateLeftLanes(bool Val) { bGenerateLeftLanes = Val; }
+	bool GetGenerateLeftLanes() const { return bGenerateLeftLanes; }
+
+	bool bGenerateRightLanes = true;
+	void SetGenerateRightLanes(bool Val) { bGenerateRightLanes = Val; }
+	bool GetGenerateRightLanes() const { return bGenerateRightLanes; }
 
 	// Lane type filters
 	bool bGenerateDrivingLane = true;
@@ -77,8 +97,29 @@ public:
 	void SetGenerateReferenceLane(bool Val) { bGenerateReferenceLane = Val; }
 	bool GetGenerateReferenceLane() const { return bGenerateReferenceLane; }
 
+	// Lane position filter
+	ELanePositionFilter LanePositionFilter = ELanePositionFilter::All;
+	void SetLanePositionFilter(ELanePositionFilter Val) { LanePositionFilter = Val; }
+	ELanePositionFilter GetLanePositionFilter() const { return LanePositionFilter; }
+
+	int32 SpecificLaneIndex = 1;
+	void SetSpecificLaneIndex(int32 Val) { SpecificLaneIndex = FMath::Max(1, Val); }
+	int32 GetSpecificLaneIndex() const { return SpecificLaneIndex; }
+
+	// Backward-compatible setter (maps to OutermostDrivingOnly)
 	bool bGenerateOutermostDrivingLaneOnly = false;
-	void SetGenerateOutermostDrivingLaneOnly(bool Val) { bGenerateOutermostDrivingLaneOnly = Val; }
+	void SetGenerateOutermostDrivingLaneOnly(bool Val)
+	{
+		bGenerateOutermostDrivingLaneOnly = Val;
+		if (Val)
+		{
+			LanePositionFilter = ELanePositionFilter::OutermostDrivingOnly;
+		}
+		else if (LanePositionFilter == ELanePositionFilter::OutermostDrivingOnly)
+		{
+			LanePositionFilter = ELanePositionFilter::All;
+		}
+	}
 	bool GetGenerateOutermostDrivingLaneOnly() const { return bGenerateOutermostDrivingLaneOnly; }
 
 private:
