@@ -47,13 +47,15 @@ ASAM OSI (Open Simulation Interface) 仕様に基づく信号機の状態管理�
 ```
 Source/OpenDRIVE/
   Public/
-    OsiTrafficLightTypes.h         -- Enum 3種 + 構造体 2種（ヘッダのみ）
-    BPI_TrafficLightUpdate.h       -- 信号機アクター側 Blueprint Interface
-    BPI_TrafficLightHandlerUpdate.h -- ハンドラー側 Blueprint Interface
-    SignalInfoComponent.h          -- 信号メタデータコンポーネント
-    TrafficLightSubsystem.h        -- WorldSubsystem（状態キャッシュ + ブロードキャスト）
-    OsiTrafficLightActor.h         -- Blueprintable ベースクラス（サンプル）
-    OsiTrafficLightActorCached.h   -- 状態キャッシュ付きサブクラス（サンプル）
+    OsiTrafficLightTypes.h             -- Enum 3種 + 構造体 2種（ヘッダのみ）
+    BPI_TrafficLightUpdate.h           -- 信号機アクター側 Blueprint Interface
+    BPI_TrafficLightHandlerUpdate.h    -- ハンドラー側 Blueprint Interface
+    SignalInfoComponent.h              -- 信号メタデータコンポーネント
+    TrafficLightSubsystem.h            -- WorldSubsystem（状態キャッシュ + ブロードキャスト）
+    OsiTrafficLightActor.h             -- Blueprintable ベースクラス（単体信号用）
+    OsiTrafficLightActorCached.h       -- 状態キャッシュ付きサブクラス
+    OsiTrafficLightAssemblyActor.h     -- アセンブリ用ベースクラス（複数信号用）
+    SignalAssemblyMapping.h            -- アセンブリマッピング データアセット
   Private/
     BPI_TrafficLightUpdate.cpp
     BPI_TrafficLightHandlerUpdate.cpp
@@ -61,6 +63,8 @@ Source/OpenDRIVE/
     TrafficLightSubsystem.cpp
     OsiTrafficLightActor.cpp
     OsiTrafficLightActorCached.cpp
+    OsiTrafficLightAssemblyActor.cpp
+    SignalAssemblyMapping.cpp
 ```
 
 ## 型定義 (OsiTrafficLightTypes.h)
@@ -94,7 +98,8 @@ Source/OpenDRIVE/
 
 | メソッド | 説明 |
 |----------|------|
-| `OnTrafficLightUpdate(FOsiTrafficLightState)` | 状態更新を受け取る |
+| `OnTrafficLightUpdate(FOsiTrafficLightState)` | 状態更新を受け取る（単体信号用） |
+| `OnTrafficLightAssemblyUpdate(int32 SignalId, FOsiTrafficLightState)` | アセンブリ内の個別信号の状態更新を受け取る |
 
 `BlueprintNativeEvent` のため、C++ (`_Implementation`) でも Blueprint (Event Graph) でもオーバーライド可能。
 
@@ -117,6 +122,7 @@ OpenDRIVE信号メタデータを保持するコンポーネント。`AOsiTraffi
 | `RoadId` | `int32` | 道路ID |
 | `Type` / `SubType` | `FString` | 信号の種類・サブタイプ |
 | `Country` | `FString` | 国コード（"DEU", "JPN" 等） |
+| `ControllerId` | `int32` | OpenDRIVE Controller ID（-1 = Controllerなし） |
 | その他 | | S, T, Value, Unit, Text, bIsDynamic, Height, Width |
 
 `FSignalGenerator` による自動配置時は全プロパティが自動設定される。
@@ -293,10 +299,11 @@ Event OnTrafficLightStateChanged (NewState: FOsiTrafficLightState)
 [Switch on Color] → ライト切り替え
 ```
 
-| クラス | 毎回呼ばれる | 変化時のみ | オーバーライド対象 |
-|--------|:---:|:---:|------------------|
-| `AOsiTrafficLightActor` | o | - | `OnTrafficLightUpdate` |
-| `AOsiTrafficLightActorCached` | - | o | `OnTrafficLightStateChanged` |
+| クラス | 毎回呼ばれる | 変化時のみ | オーバーライド対象 | 信号数 |
+|--------|:---:|:---:|------------------|:---:|
+| `AOsiTrafficLightActor` | o | - | `OnTrafficLightUpdate` | 単体 |
+| `AOsiTrafficLightActorCached` | - | o | `OnTrafficLightStateChanged` | 単体 |
+| `AOsiTrafficLightAssemblyActor` | o | - | `OnTrafficLightAssemblyUpdate` | 複数 |
 
 ### 4. 信号機アクターの作成（C++）
 
@@ -360,16 +367,155 @@ Subsystem->UpdateTrafficLightById(1, State);
 #### エディタ自動配置（FSignalGenerator）
 
 OpenDRIVEファイルの信号データに基づいて `FSignalGenerator` がアクターを自動配置する。
+
+**個別モード**（デフォルト）:
 `AOsiTrafficLightActor` のBPサブクラスを `USignalTypeMapping` に登録しておけば、
 自動配置時にデフォルトの `SignalInfoComponent` に全メタデータが自動設定される。
 
 ```
-FSignalGenerator::GenerateSignals()
+FSignalGenerator::GenerateSignals() [個別モード]
   -> SpawnActor (SignalTypeMappingに基づく)
   -> 既存の SignalInfoComponent を検索 (なければ新規作成)
-  -> SignalId, RoadId, Type, etc. を設定
+  -> SignalId, RoadId, Type, ControllerId, etc. を設定
   -> アクターは BeginPlay で SignalInfo->SignalId を使ってフィルタリング
 ```
+
+**アセンブリモード**（Enable Assembly ON）:
+近接・同方向の信号をグループ化し、`USignalAssemblyMapping` に基づいてアセンブリアクターをスポーン。
+詳細は「信号機アセンブリ」セクションを参照。
+
+```
+FSignalGenerator::GenerateSignals() [アセンブリモード]
+  -> Road単位で信号を収集
+  -> Union-Find で距離+ヘディングによりグループ化
+  -> グループ内の信号タイプ集合で SignalAssemblyMapping を検索
+  -> SpawnActor + 各構成信号の SignalInfoComponent を付与
+```
+
+## 信号機アセンブリ (Signal Assembly)
+
+### 概要
+
+日本の交通信号機は、三色信号＋矢印信号（左折・直進・右折）など複数のヘッドが一体の構造になっている。
+OpenDRIVEでは各ヘッドが別々の Signal オブジェクトとして記述されるため、一体型のアセットを配置しにくい。
+
+**アセンブリ機能**は、同一Road上で近接かつ同方向の信号を自動的にグループ化し、1つのアクターとしてスポーンする。
+
+### アーキテクチャ
+
+```
+FSignalGenerator (Assembly Mode)
+  |
+  |  1. Road単位で全信号を収集
+  |  2. Union-Find で距離+ヘディングによりグループ化
+  |  3. グループの信号タイプ集合で USignalAssemblyMapping を検索
+  |
+  v
++-----------------------------------------------+
+| Assembly Actor (AOsiTrafficLightAssemblyActor) |
+|                                               |
+|  SignalInfoComponent[0]: SignalId=100 (三色)   |
+|  SignalInfoComponent[1]: SignalId=101 (矢印左) |
+|  SignalInfoComponent[2]: SignalId=102 (矢印右) |
+|                                               |
+|  ManagedSignalIds: {100, 101, 102}            |
+|  OnSubsystemStateUpdated で全IDをフィルタ      |
+|  → OnTrafficLightAssemblyUpdate(Id, State)    |
++-----------------------------------------------+
+```
+
+### グループ化条件
+
+- **同一Road内のみ**（異なるRoad間ではグループ化しない）
+- **距離**: 信号間の3D距離 < `AssemblyDistanceThreshold`（デフォルト 5.0m）
+- **ヘディング**: 信号の向きの差 < `AssemblyHeadingTolerance`（デフォルト 15.0°）
+
+グループ化にはUnion-Findアルゴリズムを使用。推移的にマージされる（A-B間が近く、B-C間が近ければ A,B,C は同一グループ）。
+
+### USignalAssemblyMapping
+
+信号タイプの組み合わせからアクタークラスを決定するデータアセット。
+
+```cpp
+USTRUCT()
+struct FSignalAssemblyMappingEntry
+{
+    TArray<FString> RequiredTypes;       // 必要な信号タイプの集合
+    TSubclassOf<AActor> ActorClass;      // スポーンするアクター
+    int32 Priority = 0;                  // マッチング優先度
+};
+```
+
+**マッチングロジック**: グループ内の信号タイプ集合が `RequiredTypes` を**すべて含む**エントリのうち、最も Priority が高いものを選択。マッチしない場合は `DefaultActorClass` にフォールバック。
+
+**例**:
+| RequiredTypes | ActorClass | Priority | 説明 |
+|---------------|-----------|----------|------|
+| `["1000001", "1000011"]` | `BP_TrafficLight_3Color_Arrow` | 10 | 三色＋矢印 |
+| `["1000001"]` | `BP_TrafficLight_3Color` | 0 | 三色のみ |
+
+### AOsiTrafficLightAssemblyActor
+
+複数の `USignalInfoComponent` を保持するアセンブリ用ベースクラス。
+
+| 項目 | 単体 (`AOsiTrafficLightActor`) | アセンブリ (`AOsiTrafficLightAssemblyActor`) |
+|------|------|------|
+| SignalInfoComponent | 1つ | 複数（構成信号ごと） |
+| IDフィルタリング | 1つのSignalId | ManagedSignalIds（TSet） |
+| 状態更新イベント | `OnTrafficLightUpdate(State)` | `OnTrafficLightAssemblyUpdate(SignalId, State)` |
+| BPでの使い方 | Colorで分岐 | SignalIdで分岐 → 各ヘッドの見た目を更新 |
+
+#### BPでの実装例
+
+```
+Event OnTrafficLightAssemblyUpdate (SignalId: int32, NewState: FOsiTrafficLightState)
+    |
+    v
+[Get Signal Info Components]  ← 構成信号のリストを取得
+    |
+    v
+[Switch on SignalId]
+    |-- 100 (三色信号) ──→ [Switch on Color] → 赤/黄/緑ライト切り替え
+    |-- 101 (矢印左)   ──→ [Branch: Mode==CONSTANT?] → 矢印ライトON/OFF
+    |-- 102 (矢印右)   ──→ [Branch: Mode==CONSTANT?] → 矢印ライトON/OFF
+```
+
+#### C++での実装
+
+```cpp
+UCLASS()
+class AMyTrafficLightAssembly : public AOsiTrafficLightAssemblyActor
+{
+    GENERATED_BODY()
+
+    virtual void OnTrafficLightAssemblyUpdate_Implementation(
+        int32 SignalId, const FOsiTrafficLightState& NewState) override
+    {
+        // SignalId に基づいて対応するサブライトの見た目を更新
+    }
+};
+```
+
+### エディタUI設定
+
+Signal タブの下部にアセンブリ設定が表示される:
+
+| 設定 | デフォルト | 説明 |
+|------|-----------|------|
+| Enable Assembly | OFF | アセンブリモードの有効/無効 |
+| Distance (m) | 5.0 | グループ化の距離閾値 |
+| Heading Tol (°) | 15.0 | グループ化のヘディング許容差 |
+| Assembly Mapping | (なし) | `USignalAssemblyMapping` データアセット |
+
+アセンブリ無効時は従来の個別信号生成（`USignalTypeMapping` ベース）が使用される。
+
+### Controller ID
+
+OpenDRIVE の `<controller>` 要素は複数の信号をグループ化する概念だが、1つのControllerが交差点全方向の信号を含むことがあるため、**アセンブリのグループ化条件には使用しない**。
+
+`ControllerId` は `USignalInfoComponent` にメタデータとして保持される（個別/アセンブリ両モード）。将来のランタイム信号制御機能の土台として利用可能。
+
+---
 
 ## 既存システムとの関係
 

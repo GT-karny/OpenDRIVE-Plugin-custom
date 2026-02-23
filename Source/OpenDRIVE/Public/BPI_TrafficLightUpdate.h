@@ -29,4 +29,13 @@ public:
 	 */
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "OSI Traffic Light")
 	void OnTrafficLightUpdate(const FOsiTrafficLightState& NewState);
+
+	/**
+	 * Called when a constituent signal in an assembly receives a state update.
+	 * Used by assembly actors that manage multiple signal heads.
+	 * @param SignalId The OpenDRIVE signal ID that was updated
+	 * @param NewState The new OSI traffic light state
+	 */
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "OSI Traffic Light")
+	void OnTrafficLightAssemblyUpdate(int32 SignalId, const FOsiTrafficLightState& NewState);
 };

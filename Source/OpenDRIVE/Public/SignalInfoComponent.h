@@ -67,4 +67,8 @@ public:
 	/** Physical width of the signal (meters) */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Signal Info")
 	double Width;
+
+	/** OpenDRIVE Controller ID that manages this signal (-1 = no controller) */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Signal Info")
+	int32 ControllerId = -1;
 };
