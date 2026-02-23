@@ -176,6 +176,33 @@ protected :
 	*/
 	void OnSignalMappingAssetSelected(const FAssetData& AssetData);
 
+	// === Signal Assembly ===
+
+	/**
+	* Called when enable assembly checkbox state is changed
+	*/
+	void OnEnableAssemblyCheckStateChanged(ECheckBoxState state);
+
+	/**
+	* Called when assembly distance threshold is changed
+	*/
+	void OnAssemblyDistanceThresholdChanged(float value);
+
+	/**
+	* Called when assembly heading tolerance is changed
+	*/
+	void OnAssemblyHeadingToleranceChanged(float value);
+
+	/**
+	* Gets the path of the assembly mapping asset
+	*/
+	FString GetAssemblyMappingAssetPath() const;
+
+	/**
+	* Called when assembly mapping asset is selected
+	*/
+	void OnAssemblyMappingAssetSelected(const FAssetData& AssetData);
+
 private : 
 
 	// Tab system
@@ -228,4 +255,9 @@ private :
 	// Signal generation
 	TSharedPtr<SCheckBox> _generateSignalsCheckBox;
 	TSharedPtr<SCheckBox> _flipSignalOrientationCheckBox;
+
+	// Signal assembly
+	TSharedPtr<SCheckBox> _enableAssemblyCheckBox;
+	TSharedPtr<STextBlock> _assemblyDistanceTextPtr;
+	TSharedPtr<STextBlock> _assemblyHeadingTextPtr;
 };

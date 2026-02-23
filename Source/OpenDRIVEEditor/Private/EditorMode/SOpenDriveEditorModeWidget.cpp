@@ -3,6 +3,7 @@
 #include "Public/EditorMode/OpenDriveEditorMode.h"
 #include "Public/SplineGenerator.h"
 #include "SignalTypeMapping.h"
+#include "SignalAssemblyMapping.h"
 
 void SOpenDRIVEEditorModeWidget::Construct(const FArguments& InArgs)
 {
@@ -508,6 +509,87 @@ TSharedRef<SWidget> SOpenDRIVEEditorModeWidget::ConstructSignalTabContent(const 
 					.ObjectPath(this, &SOpenDRIVEEditorModeWidget::GetSignalMappingAssetPath)
 					.OnObjectChanged(this, &SOpenDRIVEEditorModeWidget::OnSignalMappingAssetSelected)
 			]
+		]
+		// --- Assembly Settings ---
+		+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 5.f, 0.f, 0.f).HAlign(HAlign_Center) [ SNew(SSeparator) ]
+		// Enable Assembly checkbox
+		+ SVerticalBox::Slot().AutoHeight().Padding(5.f, 5.f, 0.f, 0.f)
+		[
+			SAssignNew(_enableAssemblyCheckBox, SCheckBox)
+				.IsChecked(ECheckBoxState::Unchecked)
+				.OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnEnableAssemblyCheckStateChanged)
+				.Content()
+				[
+					SNew(STextBlock).Text(FText::FromString("Enable Assembly"))
+				]
+		]
+		// Distance Threshold slider
+		+ SVerticalBox::Slot().AutoHeight().Padding(5.f, 5.f, 5.f, 0.f)
+		[
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(5)
+			[
+				SNew(STextBlock)
+					.Text(FText::FromString("Distance (m):"))
+					.Font(*_fontInfoPtr)
+			]
+			+ SHorizontalBox::Slot().FillWidth(1.0f).Padding(5)
+			[
+				SNew(SSpinBox<float>)
+					.MinValue(0.1f)
+					.MaxValue(50.0f)
+					.Value(5.0f)
+					.OnValueChanged(this, &SOpenDRIVEEditorModeWidget::OnAssemblyDistanceThresholdChanged)
+			]
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(5, 0, 0, 0)
+			[
+				SAssignNew(_assemblyDistanceTextPtr, STextBlock)
+					.Text(FText::FromString("5.0"))
+					.Font(*_fontInfoPtr)
+			]
+		]
+		// Heading Tolerance slider
+		+ SVerticalBox::Slot().AutoHeight().Padding(5.f, 5.f, 5.f, 0.f)
+		[
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(5)
+			[
+				SNew(STextBlock)
+					.Text(FText::FromString("Heading Tol (\xC2\xB0):"))
+					.Font(*_fontInfoPtr)
+			]
+			+ SHorizontalBox::Slot().FillWidth(1.0f).Padding(5)
+			[
+				SNew(SSpinBox<float>)
+					.MinValue(1.0f)
+					.MaxValue(90.0f)
+					.Value(15.0f)
+					.OnValueChanged(this, &SOpenDRIVEEditorModeWidget::OnAssemblyHeadingToleranceChanged)
+			]
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(5, 0, 0, 0)
+			[
+				SAssignNew(_assemblyHeadingTextPtr, STextBlock)
+					.Text(FText::FromString("15.0"))
+					.Font(*_fontInfoPtr)
+			]
+		]
+		// Assembly Mapping Asset picker
+		+ SVerticalBox::Slot().AutoHeight().Padding(5.f, 5.f, 5.f, 10.f)
+		[
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(5)
+			[
+				SNew(STextBlock)
+					.Text(FText::FromString("Assembly Mapping:"))
+					.Font(*_fontInfoPtr)
+			]
+			+ SHorizontalBox::Slot().FillWidth(1.0f).Padding(5)
+			[
+				SNew(SObjectPropertyEntryBox)
+					.AllowedClass(USignalAssemblyMapping::StaticClass())
+					.ObjectPath(this, &SOpenDRIVEEditorModeWidget::GetAssemblyMappingAssetPath)
+					.OnObjectChanged(this, &SOpenDRIVEEditorModeWidget::OnAssemblyMappingAssetSelected)
+			]
 		];
 }
 
@@ -761,5 +843,42 @@ void SOpenDRIVEEditorModeWidget::OnSignalMappingAssetSelected(const FAssetData& 
 {
 	USignalTypeMapping* Asset = Cast<USignalTypeMapping>(AssetData.GetAsset());
 	GetEdMode()->SignalGenerator.SetSignalTypeMappingAsset(Asset);
+}
+
+// === Signal Assembly callbacks ===
+
+void SOpenDRIVEEditorModeWidget::OnEnableAssemblyCheckStateChanged(ECheckBoxState state)
+{
+	GetEdMode()->SignalGenerator.SetEnableAssembly(state == ECheckBoxState::Checked);
+}
+
+void SOpenDRIVEEditorModeWidget::OnAssemblyDistanceThresholdChanged(float value)
+{
+	GetEdMode()->SignalGenerator.SetAssemblyDistanceThreshold(value);
+	if (_assemblyDistanceTextPtr.IsValid())
+	{
+		_assemblyDistanceTextPtr->SetText(FText::FromString(FString::Printf(TEXT("%.1f"), value)));
+	}
+}
+
+void SOpenDRIVEEditorModeWidget::OnAssemblyHeadingToleranceChanged(float value)
+{
+	GetEdMode()->SignalGenerator.SetAssemblyHeadingTolerance(value);
+	if (_assemblyHeadingTextPtr.IsValid())
+	{
+		_assemblyHeadingTextPtr->SetText(FText::FromString(FString::Printf(TEXT("%.1f"), value)));
+	}
+}
+
+FString SOpenDRIVEEditorModeWidget::GetAssemblyMappingAssetPath() const
+{
+	USignalAssemblyMapping* Asset = GetEdMode()->SignalGenerator.GetSignalAssemblyMappingAsset();
+	return Asset ? Asset->GetPathName() : FString();
+}
+
+void SOpenDRIVEEditorModeWidget::OnAssemblyMappingAssetSelected(const FAssetData& AssetData)
+{
+	USignalAssemblyMapping* Asset = Cast<USignalAssemblyMapping>(AssetData.GetAsset());
+	GetEdMode()->SignalGenerator.SetSignalAssemblyMappingAsset(Asset);
 }
 
