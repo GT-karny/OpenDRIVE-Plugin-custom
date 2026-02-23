@@ -3,8 +3,6 @@
 
 void FSplineGenerator::GenerateLaneSplines(UWorld* World)
 {
-	ClearGeneratedSplines();
-
 	if (!World)
 	{
 		UE_LOG(LogClass, Warning, TEXT("GenerateLaneSplines: World is null"));
