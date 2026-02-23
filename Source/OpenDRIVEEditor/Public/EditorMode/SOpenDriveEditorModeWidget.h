@@ -3,6 +3,8 @@
 #include "PropertyCustomizationHelpers.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Widgets/Input/SSpinBox.h"
+#include "Widgets/Layout/SWidgetSwitcher.h"
+#include "Widgets/Input/SSegmentedControl.h"
 
 class SOpenDRIVEEditorModeWidget : public SCompoundWidget
 {
@@ -36,14 +38,24 @@ protected :
 	TSharedRef<SBorder> ConstructLaneInfoBox(const FArguments& InArgs);
 
 	/**
-	 *  Constructs the generate and reset buttons
+	 * Constructs the tab selector bar (Road / Spline / Signal)
 	 */
-	TSharedRef<SHorizontalBox> ConstructButtons(const FArguments& InArgs);
+	TSharedRef<SWidget> ConstructTabBar(const FArguments& InArgs);
 
 	/**
-	* Constructs the road generation parameters box (offset / step)
-	*/
-	TSharedRef<SBorder> ConstructRoadGenerationParameters(const FArguments& InArgs);
+	 * Constructs the Road tab content (preview settings + filters)
+	 */
+	TSharedRef<SWidget> ConstructRoadTabContent(const FArguments& InArgs);
+
+	/**
+	 * Constructs the Spline tab content (spline generation settings)
+	 */
+	TSharedRef<SWidget> ConstructSplineTabContent(const FArguments& InArgs);
+
+	/**
+	 * Constructs the Signal tab content (signal generation settings)
+	 */
+	TSharedRef<SWidget> ConstructSignalTabContent(const FArguments& InArgs);
 
 	/**
 	* Link the Generate() function in the OpenDRIVEEditorMode.cpp file
@@ -117,6 +129,9 @@ protected :
 	void OnLeftLanesCheckStateChanged(ECheckBoxState state);
 	void OnRightLanesCheckStateChanged(ECheckBoxState state);
 
+	// Select All / Deselect All for lane type filters
+	void SetAllLaneTypeCheckBoxes(bool bChecked);
+
 	// Lane position filter callbacks
 	void OnLanePositionFilterChanged(TSharedPtr<FString> NewValue, ESelectInfo::Type Type);
 	TSharedRef<SWidget> MakeLanePositionFilterWidget(TSharedPtr<FString> InOption);
@@ -163,6 +178,10 @@ protected :
 
 private : 
 
+	// Tab system
+	int32 _activeTabIndex = 0;
+	TSharedPtr<SWidgetSwitcher> _tabSwitcher;
+
 	//Text font
 	TSharedPtr<FSlateFontInfo> _fontInfoPtr;
 
@@ -189,6 +208,17 @@ private :
 	// Side filter checkboxes
 	TSharedPtr<SCheckBox> _leftLanesCheckBox;
 	TSharedPtr<SCheckBox> _rightLanesCheckBox;
+
+	// Lane type filter checkboxes
+	TSharedPtr<SCheckBox> _drivingCheckBox;
+	TSharedPtr<SCheckBox> _sidewalkCheckBox;
+	TSharedPtr<SCheckBox> _bikingCheckBox;
+	TSharedPtr<SCheckBox> _parkingCheckBox;
+	TSharedPtr<SCheckBox> _shoulderCheckBox;
+	TSharedPtr<SCheckBox> _restrictedCheckBox;
+	TSharedPtr<SCheckBox> _medianCheckBox;
+	TSharedPtr<SCheckBox> _otherCheckBox;
+	TSharedPtr<SCheckBox> _referenceCheckBox;
 
 	// Lane position filter
 	TSharedPtr<SComboBox<TSharedPtr<FString>>> _lanePositionFilterComboBox;

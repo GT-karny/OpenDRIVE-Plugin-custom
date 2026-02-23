@@ -11,25 +11,54 @@ void SOpenDRIVEEditorModeWidget::Construct(const FArguments& InArgs)
 	ChildSlot
 	[
 		SNew(SVerticalBox)
+		// Tab selector bar
 		+ SVerticalBox::Slot()
 		.AutoHeight()
-		.Padding(0.f, 30.f, 0.f, 0.f)
+		.Padding(20.f, 20.f, 20.f, 0.f)
+		.HAlign(HAlign_Center)
 		[
-			ConstructButtons(InArgs)
+			ConstructTabBar(InArgs)
 		]
+		// Tab content area
 		+ SVerticalBox::Slot()
 		.AutoHeight()
-		.Padding(20.f, 30.f, 20.f, 0.f)
+		.Padding(20.f, 10.f, 20.f, 0.f)
 		[
-			ConstructRoadGenerationParameters(InArgs)
+			SNew(SBorder)
+			[
+				SAssignNew(_tabSwitcher, SWidgetSwitcher)
+				.WidgetIndex_Lambda([this]() { return _activeTabIndex; })
+				+ SWidgetSwitcher::Slot() [ ConstructRoadTabContent(InArgs) ]
+				+ SWidgetSwitcher::Slot() [ ConstructSplineTabContent(InArgs) ]
+				+ SWidgetSwitcher::Slot() [ ConstructSignalTabContent(InArgs) ]
+			]
 		]
+		// Lane Info (always visible)
 		+ SVerticalBox::Slot()
 		.AutoHeight()
-		.Padding(20.f, 30.f, 20.f, 0.f)
+		.Padding(20.f, 20.f, 20.f, 0.f)
 		[
 			ConstructLaneInfoBox(InArgs)
 		]
 	];
+}
+
+TSharedRef<SWidget> SOpenDRIVEEditorModeWidget::ConstructTabBar(const FArguments& InArgs)
+{
+	return
+		SNew(SSegmentedControl<int32>)
+		.UniformPadding(FMargin(12.f, 4.f))
+		.Value(0)
+		.OnValueChanged_Lambda([this](int32 NewIndex)
+		{
+			_activeTabIndex = NewIndex;
+		})
+		+ SSegmentedControl<int32>::Slot(0)
+			.Text(FText::FromString("Road"))
+		+ SSegmentedControl<int32>::Slot(1)
+			.Text(FText::FromString("Spline"))
+		+ SSegmentedControl<int32>::Slot(2)
+			.Text(FText::FromString("Signal"));
 }
 
 TSharedRef<SBorder> SOpenDRIVEEditorModeWidget::ConstructLaneInfoBox(const FArguments& InArgs)
@@ -128,84 +157,21 @@ TSharedRef<SBorder> SOpenDRIVEEditorModeWidget::ConstructLaneInfoBox(const FArgu
 	return border;
 }
 
-TSharedRef<SHorizontalBox> SOpenDRIVEEditorModeWidget::ConstructButtons(const FArguments& InArgs)
+TSharedRef<SWidget> SOpenDRIVEEditorModeWidget::ConstructRoadTabContent(const FArguments& InArgs)
 {
 	// Reset Button
 	TSharedPtr<SButton> resetButton = SNew(SButton).Text(FText::FromString("Reset"))
 		.OnClicked(this, &SOpenDRIVEEditorModeWidget::Reset).IsEnabled(this, &SOpenDRIVEEditorModeWidget::IsLoaded)
 		.ToolTipText(FText::FromString(TEXT("Resets currently drawn roads.")));
-
 	StaticCast<STextBlock&>(resetButton.ToSharedRef().Get().GetContent().Get()).SetJustification(ETextJustify::Center);
 
 	// Generate Button
 	TSharedPtr<SButton> generateButton = SNew(SButton).Text(FText::FromString("Generate"))
 		.OnClicked(this, &SOpenDRIVEEditorModeWidget::Generate).IsEnabled(this, &SOpenDRIVEEditorModeWidget::CheckIfInEditorMode)
 		.ToolTipText(FText::FromString(TEXT("Draws roads (will reset currently drawn roads).")));
-
 	StaticCast<STextBlock&>(generateButton.ToSharedRef().Get().GetContent().Get()).SetJustification(ETextJustify::Center);
 
-	// Generate Splines Button
-	TSharedPtr<SButton> generateSplinesButton = SNew(SButton).Text(FText::FromString("Gen Splines"))
-		.OnClicked(this, &SOpenDRIVEEditorModeWidget::GenerateLaneSplines).IsEnabled(this, &SOpenDRIVEEditorModeWidget::CheckIfInEditorMode)
-		.ToolTipText(FText::FromString(TEXT("Generates persistent spline actors for all lanes. Previously generated splines are kept.")));
-
-	StaticCast<STextBlock&>(generateSplinesButton.ToSharedRef().Get().GetContent().Get()).SetJustification(ETextJustify::Center);
-
-	// Clear Splines Button
-	TSharedPtr<SButton> clearSplinesButton = SNew(SButton).Text(FText::FromString("Clear Splines"))
-		.OnClicked(this, &SOpenDRIVEEditorModeWidget::ClearGeneratedSplines).IsEnabled(this, &SOpenDRIVEEditorModeWidget::CheckIfInEditorMode)
-		.ToolTipText(FText::FromString(TEXT("Clears all previously generated spline actors.")));
-
-	StaticCast<STextBlock&>(clearSplinesButton.ToSharedRef().Get().GetContent().Get()).SetJustification(ETextJustify::Center);
-
-	// Generate Signals Button
-	TSharedPtr<SButton> generateSignalsButton = SNew(SButton).Text(FText::FromString("Gen Signals"))
-		.OnClicked(this, &SOpenDRIVEEditorModeWidget::GenerateSignals).IsEnabled(this, &SOpenDRIVEEditorModeWidget::CheckIfInEditorMode)
-		.ToolTipText(FText::FromString(TEXT("Generates signal actors from OpenDRIVE data.")));
-
-	StaticCast<STextBlock&>(generateSignalsButton.ToSharedRef().Get().GetContent().Get()).SetJustification(ETextJustify::Center);
-
-	// Layout: 2 rows inside a VerticalBox wrapped in a HorizontalBox (to match return type)
-	TSharedRef<SHorizontalBox> horBox =
-		SNew(SHorizontalBox)
-		+ SHorizontalBox::Slot().FillWidth(1.f)
-		[
-			SNew(SVerticalBox)
-			+ SVerticalBox::Slot().AutoHeight()
-			[
-				SNew(SHorizontalBox)
-				+ SHorizontalBox::Slot().Padding(20, 0, 0, 0).FillWidth(0.5f)
-				[
-					resetButton.ToSharedRef()
-				]
-				+ SHorizontalBox::Slot().Padding(10, 0, 20, 0).FillWidth(0.5f)
-				[
-					generateButton.ToSharedRef()
-				]
-			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(0, 5, 0, 0)
-			[
-				SNew(SHorizontalBox)
-				+ SHorizontalBox::Slot().Padding(20, 0, 0, 0).FillWidth(1.f / 3.f)
-				[
-					generateSplinesButton.ToSharedRef()
-				]
-				+ SHorizontalBox::Slot().Padding(10, 0, 0, 0).FillWidth(1.f / 3.f)
-				[
-					clearSplinesButton.ToSharedRef()
-				]
-				+ SHorizontalBox::Slot().Padding(10, 0, 20, 0).FillWidth(1.f / 3.f)
-				[
-					generateSignalsButton.ToSharedRef()
-				]
-			]
-		];
-
-	return horBox;
-}
-
-TSharedRef<SBorder> SOpenDRIVEEditorModeWidget::ConstructRoadGenerationParameters(const FArguments& InArgs)
-{
+	// Sliders
 	_offsetTextPtr = SNew(STextBlock).Justification(ETextJustify::Center)
 		.Text(FText::FromString("ZOffset : " + FString::FormatAsNumber(GetEdMode()->GetRoadOffset())))
 		.Font(*_fontInfoPtr)
@@ -227,6 +193,109 @@ TSharedRef<SBorder> SOpenDRIVEEditorModeWidget::ConstructRoadGenerationParameter
 	_showArrowsCheckBox = SNew(SCheckBox)
 		.IsEnabled(this, &SOpenDRIVEEditorModeWidget::CheckIfInEditorMode)
 		.OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnCheckStateChanged);
+
+	return SNew(SVerticalBox)
+		// Buttons: Reset | Generate
+		+ SVerticalBox::Slot().AutoHeight().Padding(5.f, 5.f, 5.f, 0.f)
+		[
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().FillWidth(0.5f).Padding(0, 0, 5, 0)
+			[
+				resetButton.ToSharedRef()
+			]
+			+ SHorizontalBox::Slot().FillWidth(0.5f).Padding(5, 0, 0, 0)
+			[
+				generateButton.ToSharedRef()
+			]
+		]
+		// Show Arrows (label + checkbox on same line)
+		+ SVerticalBox::Slot().AutoHeight().Padding(5.f, 10.f, 5.f, 0.f)
+		[
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(5, 0, 10, 0)
+			[
+				SNew(STextBlock)
+				.Text(FText::FromString(TEXT("Show arrows")))
+				.Font(*_fontInfoPtr)
+				.ToolTipText(FText::FromString(TEXT("Tick the checkbox to see the roads' directions.")))
+			]
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+			[
+				_showArrowsCheckBox.ToSharedRef()
+			]
+		]
+		// ZOffset slider
+		+ SVerticalBox::Slot().AutoHeight().Padding(5.f, 10.f, 0.f, 0.f)
+		[
+			_offsetTextPtr.ToSharedRef()
+		]
+		+ SVerticalBox::Slot().AutoHeight().Padding(5.f, 5.f, 5.f, 0.f)
+		[
+			OffsetSlider
+		]
+		// Step slider
+		+ SVerticalBox::Slot().AutoHeight().Padding(5.f, 5.f, 0.f, 0.f)
+		[
+			_stepTextPtr.ToSharedRef()
+		]
+		+ SVerticalBox::Slot().AutoHeight().Padding(5.f, 5.f, 5.f, 10.f)
+		[
+			StepSlider
+		];
+}
+
+TSharedRef<SWidget> SOpenDRIVEEditorModeWidget::ConstructSplineTabContent(const FArguments& InArgs)
+{
+	// Gen Splines Button
+	TSharedPtr<SButton> generateSplinesButton = SNew(SButton).Text(FText::FromString("Gen Splines"))
+		.OnClicked(this, &SOpenDRIVEEditorModeWidget::GenerateLaneSplines).IsEnabled(this, &SOpenDRIVEEditorModeWidget::CheckIfInEditorMode)
+		.ToolTipText(FText::FromString(TEXT("Generates persistent spline actors for all lanes. Previously generated splines are kept.")));
+	StaticCast<STextBlock&>(generateSplinesButton.ToSharedRef().Get().GetContent().Get()).SetJustification(ETextJustify::Center);
+
+	// Clear Splines Button
+	TSharedPtr<SButton> clearSplinesButton = SNew(SButton).Text(FText::FromString("Clear Splines"))
+		.OnClicked(this, &SOpenDRIVEEditorModeWidget::ClearGeneratedSplines).IsEnabled(this, &SOpenDRIVEEditorModeWidget::CheckIfInEditorMode)
+		.ToolTipText(FText::FromString(TEXT("Clears all previously generated spline actors.")));
+	StaticCast<STextBlock&>(clearSplinesButton.ToSharedRef().Get().GetContent().Get()).SetJustification(ETextJustify::Center);
+
+	// Select All / Deselect All buttons
+	TSharedPtr<SButton> selectAllButton = SNew(SButton).Text(FText::FromString("All"))
+		.OnClicked_Lambda([this]() { SetAllLaneTypeCheckBoxes(true); return FReply::Handled(); })
+		.ToolTipText(FText::FromString(TEXT("Check all lane type filters.")));
+	StaticCast<STextBlock&>(selectAllButton.ToSharedRef().Get().GetContent().Get()).SetJustification(ETextJustify::Center);
+
+	TSharedPtr<SButton> deselectAllButton = SNew(SButton).Text(FText::FromString("None"))
+		.OnClicked_Lambda([this]() { SetAllLaneTypeCheckBoxes(false); return FReply::Handled(); })
+		.ToolTipText(FText::FromString(TEXT("Uncheck all lane type filters.")));
+	StaticCast<STextBlock&>(deselectAllButton.ToSharedRef().Get().GetContent().Get()).SetJustification(ETextJustify::Center);
+
+	// Spline generation mode combo options
+	_splineGenModeOptions.Add(MakeShareable(new FString("Center")));
+	_splineGenModeOptions.Add(MakeShareable(new FString("Inside")));
+	_splineGenModeOptions.Add(MakeShareable(new FString("Outside")));
+
+	_splineGenModeComboBox = SNew(SComboBox<TSharedPtr<FString>>)
+		.OptionsSource(&_splineGenModeOptions)
+		.OnGenerateWidget(this, &SOpenDRIVEEditorModeWidget::MakeSplineResampleModeWidget)
+		.OnSelectionChanged(this, &SOpenDRIVEEditorModeWidget::OnSplineResampleModeChanged)
+		[
+			SNew(STextBlock).Text_Lambda([this]()
+			{
+				if (_splineGenModeComboBox.IsValid() && _splineGenModeComboBox->GetSelectedItem().IsValid())
+				{
+					return FText::FromString(*_splineGenModeComboBox->GetSelectedItem());
+				}
+				return FText::FromString("Center");
+			})
+			.Font(*_fontInfoPtr)
+		];
+
+	// Set initial selection based on mode
+	AOpenDriveLaneSpline::EOpenDriveLaneSplineMode CurrentMode = GetEdMode()->GetSplineGenerationMode();
+	if (_splineGenModeOptions.IsValidIndex((int)CurrentMode))
+	{
+		_splineGenModeComboBox->SetSelectedItem(_splineGenModeOptions[(int)CurrentMode]);
+	}
 
 	// Lane position filter combo options
 	_lanePositionFilterOptions.Add(MakeShareable(new FString("All")));
@@ -251,242 +320,195 @@ TSharedRef<SBorder> SOpenDRIVEEditorModeWidget::ConstructRoadGenerationParameter
 			})
 			.Font(*_fontInfoPtr)
 		];
-
 	_lanePositionFilterComboBox->SetSelectedItem(_lanePositionFilterOptions[0]);
 
-	// Spline generation mode combo options
-	_splineGenModeOptions.Add(MakeShareable(new FString("Center")));
-	_splineGenModeOptions.Add(MakeShareable(new FString("Inside")));
-	_splineGenModeOptions.Add(MakeShareable(new FString("Outside")));
-
-	_splineGenModeComboBox = SNew(SComboBox<TSharedPtr<FString>>)
-		.OptionsSource(&_splineGenModeOptions)
-		.OnGenerateWidget(this, &SOpenDRIVEEditorModeWidget::MakeSplineResampleModeWidget)
-		.OnSelectionChanged(this, &SOpenDRIVEEditorModeWidget::OnSplineResampleModeChanged)
+	return SNew(SVerticalBox)
+		// Buttons: Gen Splines | Clear Splines
+		+ SVerticalBox::Slot().AutoHeight().Padding(5.f, 5.f, 5.f, 0.f)
 		[
-			SNew(STextBlock).Text_Lambda([this]()
-			{
-				if (_splineGenModeComboBox.IsValid() && _splineGenModeComboBox->GetSelectedItem().IsValid())
-				{
-					return FText::FromString(*_splineGenModeComboBox->GetSelectedItem());
-				}
-				return FText::FromString("Center");
-			})
-			.Font(*_fontInfoPtr)
-		];
-	
-	// Set initial selection based on mode
-	AOpenDriveLaneSpline::EOpenDriveLaneSplineMode CurrentMode = GetEdMode()->GetSplineGenerationMode();
-	if (_splineGenModeOptions.IsValidIndex((int)CurrentMode))
-	{
-		_splineGenModeComboBox->SetSelectedItem(_splineGenModeOptions[(int)CurrentMode]);
-	}
-
-	TSharedRef<SBorder> border = SNew(SBorder)
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().FillWidth(0.5f).Padding(0, 0, 5, 0)
+			[
+				generateSplinesButton.ToSharedRef()
+			]
+			+ SHorizontalBox::Slot().FillWidth(0.5f).Padding(5, 0, 0, 0)
+			[
+				clearSplinesButton.ToSharedRef()
+			]
+		]
+		+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 10.f, 0.f, 0.f).HAlign(HAlign_Center) [ SNew(SSeparator) ]
+		// Spline Generation Reference + Lane Position Filter (side by side)
+		+ SVerticalBox::Slot().AutoHeight().Padding(5.f, 5.f, 5.f, 0.f)
 		[
-			SNew(SVerticalBox)
-			// General Generation Filters
-			+ SVerticalBox::Slot().AutoHeight().Padding(5.f, 5.f, 0.f, 0.f)
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().FillWidth(0.5f).Padding(0, 0, 5, 0)
 			[
-				SNew(STextBlock).Text(FText::FromString("General Generation Filters")).Font(*_fontInfoPtr).Justification(ETextJustify::Center)
-			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(5.f, 2.f, 0.f, 0.f)
-			[
-				SNew(SHorizontalBox)
-				+ SHorizontalBox::Slot().AutoWidth().Padding(5) [ SNew(SCheckBox).IsChecked(ECheckBoxState::Checked).OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnGenerateRoadsCheckStateChanged) .Content()[ SNew(STextBlock).Text(FText::FromString("Generate Roads")) ] ]
-				+ SHorizontalBox::Slot().AutoWidth().Padding(5) [ SNew(SCheckBox).IsChecked(ECheckBoxState::Checked).OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnGenerateJunctionsCheckStateChanged) .Content()[ SNew(STextBlock).Text(FText::FromString("Generate Junctions")) ] ]
-			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(5.f, 2.f, 0.f, 0.f)
-			[
-				SNew(SHorizontalBox)
-				+ SHorizontalBox::Slot().AutoWidth().Padding(5)
+				SNew(SVerticalBox)
+				+ SVerticalBox::Slot().AutoHeight()
 				[
-					SAssignNew(_leftLanesCheckBox, SCheckBox)
-						.IsChecked(ECheckBoxState::Checked)
-						.OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnLeftLanesCheckStateChanged)
-						.Content()[ SNew(STextBlock).Text(FText::FromString("Left Lanes")) ]
+					SNew(STextBlock).Text(FText::FromString("Reference")).Font(*_fontInfoPtr).Justification(ETextJustify::Center)
 				]
-				+ SHorizontalBox::Slot().AutoWidth().Padding(5)
+				+ SVerticalBox::Slot().AutoHeight().Padding(0, 2, 0, 0)
 				[
-					SAssignNew(_rightLanesCheckBox, SCheckBox)
-						.IsChecked(ECheckBoxState::Checked)
-						.OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnRightLanesCheckStateChanged)
-						.Content()[ SNew(STextBlock).Text(FText::FromString("Right Lanes")) ]
+					_splineGenModeComboBox.ToSharedRef()
 				]
 			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 10.f, 0.f, 0.f).HAlign(HAlign_Center) [ SNew(SSeparator) ]
-			// Lane Filters
-			+ SVerticalBox::Slot().AutoHeight().Padding(5.f, 5.f, 0.f, 0.f)
+			+ SHorizontalBox::Slot().FillWidth(0.5f).Padding(5, 0, 0, 0)
 			[
-				SNew(STextBlock).Text(FText::FromString("Lane Generation Filters")).Font(*_fontInfoPtr).Justification(ETextJustify::Center)
-			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(5.f, 2.f, 0.f, 0.f)
-			[
-				SNew(SHorizontalBox)
-				+ SHorizontalBox::Slot().AutoWidth().Padding(5) [ SNew(SCheckBox).IsChecked(ECheckBoxState::Checked).OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnDrivingLaneCheckStateChanged) .Content()[ SNew(STextBlock).Text(FText::FromString("Driving")) ] ]
-				+ SHorizontalBox::Slot().AutoWidth().Padding(5) [ SNew(SCheckBox).IsChecked(ECheckBoxState::Checked).OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnSidewalkLaneCheckStateChanged) .Content()[ SNew(STextBlock).Text(FText::FromString("Sidewalk")) ] ]
-			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(5.f, 2.f, 0.f, 0.f)
-			[
-				SNew(SHorizontalBox)
-				+ SHorizontalBox::Slot().AutoWidth().Padding(5) [ SNew(SCheckBox).IsChecked(ECheckBoxState::Checked).OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnBikingLaneCheckStateChanged) .Content()[ SNew(STextBlock).Text(FText::FromString("Biking")) ] ]
-				+ SHorizontalBox::Slot().AutoWidth().Padding(5) [ SNew(SCheckBox).IsChecked(ECheckBoxState::Checked).OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnParkingLaneCheckStateChanged) .Content()[ SNew(STextBlock).Text(FText::FromString("Parking")) ] ]
-			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(5.f, 2.f, 0.f, 0.f)
-			[
-				SNew(SHorizontalBox)
-				+ SHorizontalBox::Slot().AutoWidth().Padding(5) [ SNew(SCheckBox).IsChecked(ECheckBoxState::Checked).OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnShoulderLaneCheckStateChanged) .Content()[ SNew(STextBlock).Text(FText::FromString("Shoulder")) ] ]
-				+ SHorizontalBox::Slot().AutoWidth().Padding(5) [ SNew(SCheckBox).IsChecked(ECheckBoxState::Checked).OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnRestrictedLaneCheckStateChanged) .Content()[ SNew(STextBlock).Text(FText::FromString("Restricted")) ] ]
-			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(5.f, 2.f, 0.f, 0.f)
-			[
-				SNew(SHorizontalBox)
-				+ SHorizontalBox::Slot().AutoWidth().Padding(5) [ SNew(SCheckBox).IsChecked(ECheckBoxState::Checked).OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnMedianLaneCheckStateChanged) .Content()[ SNew(STextBlock).Text(FText::FromString("Median")) ] ]
-				+ SHorizontalBox::Slot().AutoWidth().Padding(5) [ SNew(SCheckBox).IsChecked(ECheckBoxState::Checked).OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnOtherLaneCheckStateChanged) .Content()[ SNew(STextBlock).Text(FText::FromString("Other")) ] ]
-			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(5.f, 2.f, 0.f, 0.f)
-			[
-				SNew(SHorizontalBox)
-				+ SHorizontalBox::Slot().AutoWidth().Padding(5) [ SNew(SCheckBox).IsChecked(ECheckBoxState::Checked).OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnReferenceLaneCheckStateChanged) .Content()[ SNew(STextBlock).Text(FText::FromString("Reference")) ] ]
-			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 10.f, 0.f, 0.f).HAlign(HAlign_Center) [ SNew(SSeparator) ]
-
-			// Lane Position Filter
-			+ SVerticalBox::Slot().AutoHeight().Padding(5.f, 5.f, 0.f, 0.f)
-			[
-				SNew(STextBlock).Text(FText::FromString("Lane Position Filter")).Font(*_fontInfoPtr).Justification(ETextJustify::Center)
-			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(5.f, 2.f, 5.f, 0.f)
-			[
-				SNew(SHorizontalBox)
-				+ SHorizontalBox::Slot().FillWidth(1.0f).Padding(5).VAlign(VAlign_Center)
+				SNew(SVerticalBox)
+				+ SVerticalBox::Slot().AutoHeight()
 				[
-					_lanePositionFilterComboBox.ToSharedRef()
+					SNew(STextBlock).Text(FText::FromString("Position")).Font(*_fontInfoPtr).Justification(ETextJustify::Center)
 				]
-				+ SHorizontalBox::Slot().AutoWidth().Padding(5).VAlign(VAlign_Center)
+				+ SVerticalBox::Slot().AutoHeight().Padding(0, 2, 0, 0)
 				[
-					SAssignNew(_specificLaneIndexSpinBox, SSpinBox<int32>)
-						.MinValue(1)
-						.MaxValue(10)
-						.Value(1)
-						.OnValueCommitted(this, &SOpenDRIVEEditorModeWidget::OnSpecificLaneIndexChanged)
-						.Visibility_Lambda([this]() -> EVisibility
-						{
-							if (_lanePositionFilterComboBox.IsValid() && _lanePositionFilterComboBox->GetSelectedItem().IsValid())
+					SNew(SHorizontalBox)
+					+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
+					[
+						_lanePositionFilterComboBox.ToSharedRef()
+					]
+					+ SHorizontalBox::Slot().AutoWidth().Padding(5, 0, 0, 0).VAlign(VAlign_Center)
+					[
+						SAssignNew(_specificLaneIndexSpinBox, SSpinBox<int32>)
+							.MinValue(1)
+							.MaxValue(10)
+							.Value(1)
+							.OnValueCommitted(this, &SOpenDRIVEEditorModeWidget::OnSpecificLaneIndexChanged)
+							.Visibility_Lambda([this]() -> EVisibility
 							{
-								return (*_lanePositionFilterComboBox->GetSelectedItem() == "Specific Index")
-									? EVisibility::Visible : EVisibility::Collapsed;
-							}
-							return EVisibility::Collapsed;
-						})
+								if (_lanePositionFilterComboBox.IsValid() && _lanePositionFilterComboBox->GetSelectedItem().IsValid())
+								{
+									return (*_lanePositionFilterComboBox->GetSelectedItem() == "Specific Index")
+										? EVisibility::Visible : EVisibility::Collapsed;
+								}
+								return EVisibility::Collapsed;
+							})
+					]
 				]
 			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 10.f, 0.f, 0.f).HAlign(HAlign_Center) [ SNew(SSeparator) ]
-
-			// Spline Generation Mode
-			+ SVerticalBox::Slot().AutoHeight().Padding(5.f, 10.f, 0.f, 0.f)
+		]
+		+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 10.f, 0.f, 0.f).HAlign(HAlign_Center) [ SNew(SSeparator) ]
+		// General Filters
+		+ SVerticalBox::Slot().AutoHeight().Padding(5.f, 5.f, 5.f, 0.f)
+		[
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().AutoWidth().Padding(5) [ SNew(SCheckBox).IsChecked(ECheckBoxState::Checked).OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnGenerateRoadsCheckStateChanged) .Content()[ SNew(STextBlock).Text(FText::FromString("Roads")) ] ]
+			+ SHorizontalBox::Slot().AutoWidth().Padding(5) [ SNew(SCheckBox).IsChecked(ECheckBoxState::Checked).OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnGenerateJunctionsCheckStateChanged) .Content()[ SNew(STextBlock).Text(FText::FromString("Junctions")) ] ]
+			+ SHorizontalBox::Slot().AutoWidth().Padding(5)
 			[
-				SNew(STextBlock).Text(FText::FromString("Spline Generation Reference")).Font(*_fontInfoPtr).Justification(ETextJustify::Center)
+				SAssignNew(_leftLanesCheckBox, SCheckBox)
+					.IsChecked(ECheckBoxState::Checked)
+					.OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnLeftLanesCheckStateChanged)
+					.Content()[ SNew(STextBlock).Text(FText::FromString("Left")) ]
 			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(5.f, 5.f, 0.f, 0.f).HAlign(HAlign_Center)
+			+ SHorizontalBox::Slot().AutoWidth().Padding(5)
 			[
-				_splineGenModeComboBox.ToSharedRef()
+				SAssignNew(_rightLanesCheckBox, SCheckBox)
+					.IsChecked(ECheckBoxState::Checked)
+					.OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnRightLanesCheckStateChanged)
+					.Content()[ SNew(STextBlock).Text(FText::FromString("Right")) ]
 			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 10.f, 0.f, 0.f).HAlign(HAlign_Center) [ SNew(SSeparator) ]
+		]
+		+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 10.f, 0.f, 0.f).HAlign(HAlign_Center) [ SNew(SSeparator) ]
+		// Lane Types header + All/None buttons
+		+ SVerticalBox::Slot().AutoHeight().Padding(5.f, 5.f, 5.f, 0.f)
+		[
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center).Padding(5, 0, 0, 0)
+			[
+				SNew(STextBlock).Text(FText::FromString("Lane Types")).Font(*_fontInfoPtr)
+			]
+			+ SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 2, 0)
+			[
+				selectAllButton.ToSharedRef()
+			]
+			+ SHorizontalBox::Slot().AutoWidth().Padding(2, 0, 5, 0)
+			[
+				deselectAllButton.ToSharedRef()
+			]
+		]
+		// Lane Types - 3 column grid
+		+ SVerticalBox::Slot().AutoHeight().Padding(5.f, 2.f, 5.f, 0.f)
+		[
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().FillWidth(1.f / 3.f).Padding(5, 2) [ SAssignNew(_drivingCheckBox, SCheckBox).IsChecked(ECheckBoxState::Checked).OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnDrivingLaneCheckStateChanged) .Content()[ SNew(STextBlock).Text(FText::FromString("Driving")) ] ]
+			+ SHorizontalBox::Slot().FillWidth(1.f / 3.f).Padding(5, 2) [ SAssignNew(_sidewalkCheckBox, SCheckBox).IsChecked(ECheckBoxState::Checked).OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnSidewalkLaneCheckStateChanged) .Content()[ SNew(STextBlock).Text(FText::FromString("Sidewalk")) ] ]
+			+ SHorizontalBox::Slot().FillWidth(1.f / 3.f).Padding(5, 2) [ SAssignNew(_bikingCheckBox, SCheckBox).IsChecked(ECheckBoxState::Checked).OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnBikingLaneCheckStateChanged) .Content()[ SNew(STextBlock).Text(FText::FromString("Biking")) ] ]
+		]
+		+ SVerticalBox::Slot().AutoHeight().Padding(5.f, 0.f, 5.f, 0.f)
+		[
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().FillWidth(1.f / 3.f).Padding(5, 2) [ SAssignNew(_parkingCheckBox, SCheckBox).IsChecked(ECheckBoxState::Checked).OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnParkingLaneCheckStateChanged) .Content()[ SNew(STextBlock).Text(FText::FromString("Parking")) ] ]
+			+ SHorizontalBox::Slot().FillWidth(1.f / 3.f).Padding(5, 2) [ SAssignNew(_shoulderCheckBox, SCheckBox).IsChecked(ECheckBoxState::Checked).OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnShoulderLaneCheckStateChanged) .Content()[ SNew(STextBlock).Text(FText::FromString("Shoulder")) ] ]
+			+ SHorizontalBox::Slot().FillWidth(1.f / 3.f).Padding(5, 2) [ SAssignNew(_restrictedCheckBox, SCheckBox).IsChecked(ECheckBoxState::Checked).OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnRestrictedLaneCheckStateChanged) .Content()[ SNew(STextBlock).Text(FText::FromString("Restricted")) ] ]
+		]
+		+ SVerticalBox::Slot().AutoHeight().Padding(5.f, 0.f, 5.f, 10.f)
+		[
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().FillWidth(1.f / 3.f).Padding(5, 2) [ SAssignNew(_medianCheckBox, SCheckBox).IsChecked(ECheckBoxState::Checked).OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnMedianLaneCheckStateChanged) .Content()[ SNew(STextBlock).Text(FText::FromString("Median")) ] ]
+			+ SHorizontalBox::Slot().FillWidth(1.f / 3.f).Padding(5, 2) [ SAssignNew(_otherCheckBox, SCheckBox).IsChecked(ECheckBoxState::Checked).OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnOtherLaneCheckStateChanged) .Content()[ SNew(STextBlock).Text(FText::FromString("Other")) ] ]
+			+ SHorizontalBox::Slot().FillWidth(1.f / 3.f).Padding(5, 2) [ SAssignNew(_referenceCheckBox, SCheckBox).IsChecked(ECheckBoxState::Checked).OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnReferenceLaneCheckStateChanged) .Content()[ SNew(STextBlock).Text(FText::FromString("Reference")) ] ]
+		];
+}
 
+TSharedRef<SWidget> SOpenDRIVEEditorModeWidget::ConstructSignalTabContent(const FArguments& InArgs)
+{
+	// Gen Signals Button
+	TSharedPtr<SButton> generateSignalsButton = SNew(SButton).Text(FText::FromString("Gen Signals"))
+		.OnClicked(this, &SOpenDRIVEEditorModeWidget::GenerateSignals).IsEnabled(this, &SOpenDRIVEEditorModeWidget::CheckIfInEditorMode)
+		.ToolTipText(FText::FromString(TEXT("Generates signal actors from OpenDRIVE data.")));
+	StaticCast<STextBlock&>(generateSignalsButton.ToSharedRef().Get().GetContent().Get()).SetJustification(ETextJustify::Center);
 
-
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			.Padding(5.f, 10.f, 0.f, 0.f)
+	return SNew(SVerticalBox)
+		// Button: Gen Signals
+		+ SVerticalBox::Slot().AutoHeight().Padding(5.f, 5.f, 5.f, 0.f)
+		[
+			generateSignalsButton.ToSharedRef()
+		]
+		+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 10.f, 0.f, 0.f).HAlign(HAlign_Center) [ SNew(SSeparator) ]
+		// Generate Signals + Flip Orientation checkboxes
+		+ SVerticalBox::Slot().AutoHeight().Padding(5.f, 5.f, 0.f, 0.f)
+		[
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().AutoWidth().Padding(5)
+			[
+				SAssignNew(_generateSignalsCheckBox, SCheckBox)
+					.IsChecked(ECheckBoxState::Checked)
+					.OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnGenerateSignalsCheckStateChanged)
+					.Content()
+					[
+						SNew(STextBlock).Text(FText::FromString("Generate Signals"))
+					]
+			]
+			+ SHorizontalBox::Slot().AutoWidth().Padding(15, 0, 5, 0)
+			[
+				SAssignNew(_flipSignalOrientationCheckBox, SCheckBox)
+					.IsChecked(ECheckBoxState::Unchecked)
+					.OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnFlipSignalOrientationCheckStateChanged)
+					.Content()
+					[
+						SNew(STextBlock).Text(FText::FromString("Flip Orientation"))
+					]
+			]
+		]
+		// Mapping Asset picker
+		+ SVerticalBox::Slot().AutoHeight().Padding(5.f, 5.f, 5.f, 10.f)
+		[
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(5)
 			[
 				SNew(STextBlock)
-				.Text(FText::FromString(TEXT("Show arrows")))
-				.Font(*_fontInfoPtr)
-				.Justification(ETextJustify::Center)
-				.ToolTipText(FText::FromString(TEXT("Tick the checkbox to see the roads' directions.")))
+					.Text(FText::FromString("Mapping Asset:"))
+					.Font(*_fontInfoPtr)
 			]
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			.Padding(5.f, 5.f, 0.f, 0.f)
-			.HAlign(HAlign_Center)
+			+ SHorizontalBox::Slot().FillWidth(1.0f).Padding(5)
 			[
-				_showArrowsCheckBox.ToSharedRef()
-			]
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			.Padding(5.f, 10.f, 0.f, 0.f)
-			[
-				_offsetTextPtr.ToSharedRef()
-			]
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			.Padding(5.f, 5.f, 5.f, 0.f)
-			[
-				OffsetSlider
-			]
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			.Padding(5.f, 5.f, 0.f, 0.f)
-			[
-				_stepTextPtr.ToSharedRef()
-			]
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			.Padding(5.f, 5.f, 5.f, 10.f)
-			[
-				StepSlider
-			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 10.f, 0.f, 0.f).HAlign(HAlign_Center) [ SNew(SSeparator) ]
-			// Signal Generation Section
-			+ SVerticalBox::Slot().AutoHeight().Padding(5.f, 5.f, 0.f, 0.f)
-			[
-				SNew(STextBlock).Text(FText::FromString("Signal Generation")).Font(*_fontInfoPtr).Justification(ETextJustify::Center)
-			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(5.f, 2.f, 0.f, 0.f)
-			[
-				SNew(SHorizontalBox)
-				+ SHorizontalBox::Slot().AutoWidth().Padding(5)
-				[
-					SAssignNew(_generateSignalsCheckBox, SCheckBox)
-						.IsChecked(ECheckBoxState::Checked)
-						.OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnGenerateSignalsCheckStateChanged)
-						.Content()
-						[
-							SNew(STextBlock).Text(FText::FromString("Generate Signals"))
-						]
-				]
-				+ SHorizontalBox::Slot().AutoWidth().Padding(15, 0, 5, 0)
-				[
-					SAssignNew(_flipSignalOrientationCheckBox, SCheckBox)
-						.IsChecked(ECheckBoxState::Unchecked)
-						.OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnFlipSignalOrientationCheckStateChanged)
-						.Content()
-						[
-							SNew(STextBlock).Text(FText::FromString("Flip Orientation"))
-						]
-				]
-			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(5.f, 2.f, 5.f, 10.f)
-			[
-				SNew(SHorizontalBox)
-				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(5)
-				[
-					SNew(STextBlock)
-						.Text(FText::FromString("Mapping Asset:"))
-						.Font(*_fontInfoPtr)
-				]
-				+ SHorizontalBox::Slot().FillWidth(1.0f).Padding(5)
-				[
-					SNew(SObjectPropertyEntryBox)
-						.AllowedClass(USignalTypeMapping::StaticClass())
-						.ObjectPath(this, &SOpenDRIVEEditorModeWidget::GetSignalMappingAssetPath)
-						.OnObjectChanged(this, &SOpenDRIVEEditorModeWidget::OnSignalMappingAssetSelected)
-				]
+				SNew(SObjectPropertyEntryBox)
+					.AllowedClass(USignalTypeMapping::StaticClass())
+					.ObjectPath(this, &SOpenDRIVEEditorModeWidget::GetSignalMappingAssetPath)
+					.OnObjectChanged(this, &SOpenDRIVEEditorModeWidget::OnSignalMappingAssetSelected)
 			]
 		];
-
-	return border;
 }
 
 FOpenDRIVEEditorMode* SOpenDRIVEEditorModeWidget::GetEdMode() const
@@ -569,6 +591,36 @@ FReply SOpenDRIVEEditorModeWidget::ClearGeneratedSplines()
 {
 	GetEdMode()->ClearGeneratedSplines();
 	return FReply::Handled();
+}
+
+void SOpenDRIVEEditorModeWidget::SetAllLaneTypeCheckBoxes(bool bChecked)
+{
+	ECheckBoxState State = bChecked ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+
+	TSharedPtr<SCheckBox> CheckBoxes[] = {
+		_drivingCheckBox, _sidewalkCheckBox, _bikingCheckBox,
+		_parkingCheckBox, _shoulderCheckBox, _restrictedCheckBox,
+		_medianCheckBox, _otherCheckBox, _referenceCheckBox
+	};
+
+	for (auto& CB : CheckBoxes)
+	{
+		if (CB.IsValid())
+		{
+			CB->SetIsChecked(State);
+		}
+	}
+
+	FOpenDRIVEEditorMode* EdMode = GetEdMode();
+	EdMode->SetGenerateDrivingLane(bChecked);
+	EdMode->SetGenerateSidewalkLane(bChecked);
+	EdMode->SetGenerateBikingLane(bChecked);
+	EdMode->SetGenerateParkingLane(bChecked);
+	EdMode->SetGenerateShoulderLane(bChecked);
+	EdMode->SetGenerateRestrictedLane(bChecked);
+	EdMode->SetGenerateMedianLane(bChecked);
+	EdMode->SetGenerateOtherLane(bChecked);
+	EdMode->SetGenerateReferenceLane(bChecked);
 }
 
 void SOpenDRIVEEditorModeWidget::OnDrivingLaneCheckStateChanged(ECheckBoxState state)
