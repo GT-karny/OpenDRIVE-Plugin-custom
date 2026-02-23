@@ -1,7 +1,8 @@
-#pragma once 
+#pragma once
 #include "../../../OpenDRIVE/Public/OpenDriveAsset.h"
 #include "PropertyCustomizationHelpers.h"
 #include "Framework/Application/SlateApplication.h"
+#include "Widgets/Input/SSpinBox.h"
 
 class SOpenDRIVEEditorModeWidget : public SCompoundWidget
 {
@@ -106,7 +107,15 @@ protected :
 	void OnMedianLaneCheckStateChanged(ECheckBoxState state);
 	void OnOtherLaneCheckStateChanged(ECheckBoxState state);
 	void OnReferenceLaneCheckStateChanged(ECheckBoxState state);
-	void OnGenerateOutermostDrivingLaneOnlyCheckStateChanged(ECheckBoxState state);
+
+	// Side filter callbacks
+	void OnLeftLanesCheckStateChanged(ECheckBoxState state);
+	void OnRightLanesCheckStateChanged(ECheckBoxState state);
+
+	// Lane position filter callbacks
+	void OnLanePositionFilterChanged(TSharedPtr<FString> NewValue, ESelectInfo::Type Type);
+	TSharedRef<SWidget> MakeLanePositionFilterWidget(TSharedPtr<FString> InOption);
+	void OnSpecificLaneIndexChanged(int32 NewValue, ETextCommit::Type CommitType);
 
 	/**
 	* Called when spline generation mode is changed
@@ -171,6 +180,15 @@ private :
 	TSharedPtr<STextBlock> _laneTypeTextPtr;
 	TSharedPtr<STextBlock> _successorIdTextPtr;
 	TSharedPtr<STextBlock> _predecessorIdTextPtr;
+
+	// Side filter checkboxes
+	TSharedPtr<SCheckBox> _leftLanesCheckBox;
+	TSharedPtr<SCheckBox> _rightLanesCheckBox;
+
+	// Lane position filter
+	TSharedPtr<SComboBox<TSharedPtr<FString>>> _lanePositionFilterComboBox;
+	TArray<TSharedPtr<FString>> _lanePositionFilterOptions;
+	TSharedPtr<SSpinBox<int32>> _specificLaneIndexSpinBox;
 
 	// Signal generation
 	TSharedPtr<SCheckBox> _generateSignalsCheckBox;

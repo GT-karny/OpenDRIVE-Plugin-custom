@@ -1,7 +1,7 @@
 #include "Public/EditorMode/SOpenDriveEditorModeWidget.h"
 #include "Public/OpenDriveEditor.h"
 #include "Public/EditorMode/OpenDriveEditorMode.h"
-#include "Public/EditorMode/SOpenDriveEditorModeWidget.h"
+#include "Public/SplineGenerator.h"
 #include "SignalTypeMapping.h"
 
 void SOpenDRIVEEditorModeWidget::Construct(const FArguments& InArgs)
@@ -211,6 +211,33 @@ TSharedRef<SBorder> SOpenDRIVEEditorModeWidget::ConstructRoadGenerationParameter
 		.IsEnabled(this, &SOpenDRIVEEditorModeWidget::CheckIfInEditorMode)
 		.OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnCheckStateChanged);
 
+	// Lane position filter combo options
+	_lanePositionFilterOptions.Add(MakeShareable(new FString("All")));
+	_lanePositionFilterOptions.Add(MakeShareable(new FString("Outermost Only")));
+	_lanePositionFilterOptions.Add(MakeShareable(new FString("Outermost Driving Only")));
+	_lanePositionFilterOptions.Add(MakeShareable(new FString("Innermost Only")));
+	_lanePositionFilterOptions.Add(MakeShareable(new FString("Innermost Driving Only")));
+	_lanePositionFilterOptions.Add(MakeShareable(new FString("Specific Index")));
+
+	_lanePositionFilterComboBox = SNew(SComboBox<TSharedPtr<FString>>)
+		.OptionsSource(&_lanePositionFilterOptions)
+		.OnGenerateWidget(this, &SOpenDRIVEEditorModeWidget::MakeLanePositionFilterWidget)
+		.OnSelectionChanged(this, &SOpenDRIVEEditorModeWidget::OnLanePositionFilterChanged)
+		[
+			SNew(STextBlock).Text_Lambda([this]()
+			{
+				if (_lanePositionFilterComboBox.IsValid() && _lanePositionFilterComboBox->GetSelectedItem().IsValid())
+				{
+					return FText::FromString(*_lanePositionFilterComboBox->GetSelectedItem());
+				}
+				return FText::FromString("All");
+			})
+			.Font(*_fontInfoPtr)
+		];
+
+	_lanePositionFilterComboBox->SetSelectedItem(_lanePositionFilterOptions[0]);
+
+	// Spline generation mode combo options
 	_splineGenModeOptions.Add(MakeShareable(new FString("Center")));
 	_splineGenModeOptions.Add(MakeShareable(new FString("Inside")));
 	_splineGenModeOptions.Add(MakeShareable(new FString("Outside")));
@@ -252,6 +279,24 @@ TSharedRef<SBorder> SOpenDRIVEEditorModeWidget::ConstructRoadGenerationParameter
 				+ SHorizontalBox::Slot().AutoWidth().Padding(5) [ SNew(SCheckBox).IsChecked(ECheckBoxState::Checked).OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnGenerateRoadsCheckStateChanged) .Content()[ SNew(STextBlock).Text(FText::FromString("Generate Roads")) ] ]
 				+ SHorizontalBox::Slot().AutoWidth().Padding(5) [ SNew(SCheckBox).IsChecked(ECheckBoxState::Checked).OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnGenerateJunctionsCheckStateChanged) .Content()[ SNew(STextBlock).Text(FText::FromString("Generate Junctions")) ] ]
 			]
+			+ SVerticalBox::Slot().AutoHeight().Padding(5.f, 2.f, 0.f, 0.f)
+			[
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot().AutoWidth().Padding(5)
+				[
+					SAssignNew(_leftLanesCheckBox, SCheckBox)
+						.IsChecked(ECheckBoxState::Checked)
+						.OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnLeftLanesCheckStateChanged)
+						.Content()[ SNew(STextBlock).Text(FText::FromString("Left Lanes")) ]
+				]
+				+ SHorizontalBox::Slot().AutoWidth().Padding(5)
+				[
+					SAssignNew(_rightLanesCheckBox, SCheckBox)
+						.IsChecked(ECheckBoxState::Checked)
+						.OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnRightLanesCheckStateChanged)
+						.Content()[ SNew(STextBlock).Text(FText::FromString("Right Lanes")) ]
+				]
+			]
 			+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 10.f, 0.f, 0.f).HAlign(HAlign_Center) [ SNew(SSeparator) ]
 			// Lane Filters
 			+ SVerticalBox::Slot().AutoHeight().Padding(5.f, 5.f, 0.f, 0.f)
@@ -286,7 +331,38 @@ TSharedRef<SBorder> SOpenDRIVEEditorModeWidget::ConstructRoadGenerationParameter
 			[
 				SNew(SHorizontalBox)
 				+ SHorizontalBox::Slot().AutoWidth().Padding(5) [ SNew(SCheckBox).IsChecked(ECheckBoxState::Checked).OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnReferenceLaneCheckStateChanged) .Content()[ SNew(STextBlock).Text(FText::FromString("Reference")) ] ]
-				+ SHorizontalBox::Slot().AutoWidth().Padding(5) [ SNew(SCheckBox).IsChecked(ECheckBoxState::Unchecked).OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnGenerateOutermostDrivingLaneOnlyCheckStateChanged) .Content()[ SNew(STextBlock).Text(FText::FromString("Outermost Driving Lane Only")) ] ]
+			]
+			+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 10.f, 0.f, 0.f).HAlign(HAlign_Center) [ SNew(SSeparator) ]
+
+			// Lane Position Filter
+			+ SVerticalBox::Slot().AutoHeight().Padding(5.f, 5.f, 0.f, 0.f)
+			[
+				SNew(STextBlock).Text(FText::FromString("Lane Position Filter")).Font(*_fontInfoPtr).Justification(ETextJustify::Center)
+			]
+			+ SVerticalBox::Slot().AutoHeight().Padding(5.f, 2.f, 5.f, 0.f)
+			[
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot().FillWidth(1.0f).Padding(5).VAlign(VAlign_Center)
+				[
+					_lanePositionFilterComboBox.ToSharedRef()
+				]
+				+ SHorizontalBox::Slot().AutoWidth().Padding(5).VAlign(VAlign_Center)
+				[
+					SAssignNew(_specificLaneIndexSpinBox, SSpinBox<int32>)
+						.MinValue(1)
+						.MaxValue(10)
+						.Value(1)
+						.OnValueCommitted(this, &SOpenDRIVEEditorModeWidget::OnSpecificLaneIndexChanged)
+						.Visibility_Lambda([this]() -> EVisibility
+						{
+							if (_lanePositionFilterComboBox.IsValid() && _lanePositionFilterComboBox->GetSelectedItem().IsValid())
+							{
+								return (*_lanePositionFilterComboBox->GetSelectedItem() == "Specific Index")
+									? EVisibility::Visible : EVisibility::Collapsed;
+							}
+							return EVisibility::Collapsed;
+						})
+				]
 			]
 			+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 10.f, 0.f, 0.f).HAlign(HAlign_Center) [ SNew(SSeparator) ]
 
@@ -527,9 +603,38 @@ void SOpenDRIVEEditorModeWidget::OnReferenceLaneCheckStateChanged(ECheckBoxState
 	GetEdMode()->SetGenerateReferenceLane(state == ECheckBoxState::Checked);
 }
 
-void SOpenDRIVEEditorModeWidget::OnGenerateOutermostDrivingLaneOnlyCheckStateChanged(ECheckBoxState state)
+void SOpenDRIVEEditorModeWidget::OnLeftLanesCheckStateChanged(ECheckBoxState state)
 {
-	GetEdMode()->SetGenerateOutermostDrivingLaneOnly(state == ECheckBoxState::Checked);
+	GetEdMode()->SetGenerateLeftLanes(state == ECheckBoxState::Checked);
+}
+
+void SOpenDRIVEEditorModeWidget::OnRightLanesCheckStateChanged(ECheckBoxState state)
+{
+	GetEdMode()->SetGenerateRightLanes(state == ECheckBoxState::Checked);
+}
+
+TSharedRef<SWidget> SOpenDRIVEEditorModeWidget::MakeLanePositionFilterWidget(TSharedPtr<FString> InOption)
+{
+	return SNew(STextBlock).Text(FText::FromString(*InOption)).Font(*_fontInfoPtr);
+}
+
+void SOpenDRIVEEditorModeWidget::OnLanePositionFilterChanged(TSharedPtr<FString> NewValue, ESelectInfo::Type Type)
+{
+	if (!NewValue.IsValid()) return;
+
+	FSplineGenerator::ELanePositionFilter Filter = FSplineGenerator::ELanePositionFilter::All;
+	if (*NewValue == "Outermost Only") Filter = FSplineGenerator::ELanePositionFilter::OutermostOnly;
+	else if (*NewValue == "Outermost Driving Only") Filter = FSplineGenerator::ELanePositionFilter::OutermostDrivingOnly;
+	else if (*NewValue == "Innermost Only") Filter = FSplineGenerator::ELanePositionFilter::InnermostOnly;
+	else if (*NewValue == "Innermost Driving Only") Filter = FSplineGenerator::ELanePositionFilter::InnermostDrivingOnly;
+	else if (*NewValue == "Specific Index") Filter = FSplineGenerator::ELanePositionFilter::SpecificIndex;
+
+	GetEdMode()->SetLanePositionFilter(Filter);
+}
+
+void SOpenDRIVEEditorModeWidget::OnSpecificLaneIndexChanged(int32 NewValue, ETextCommit::Type CommitType)
+{
+	GetEdMode()->SetSpecificLaneIndex(NewValue);
 }
 
 TSharedRef<SWidget> SOpenDRIVEEditorModeWidget::MakeSplineResampleModeWidget(TSharedPtr<FString> InOption)

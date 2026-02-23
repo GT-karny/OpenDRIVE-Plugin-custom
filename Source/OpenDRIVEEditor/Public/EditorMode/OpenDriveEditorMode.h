@@ -122,6 +122,20 @@ public :
 	void SetGenerateOutermostDrivingLaneOnly(bool bGenerate) { SplineGenerator.SetGenerateOutermostDrivingLaneOnly(bGenerate); }
 	bool GetGenerateOutermostDrivingLaneOnly() const { return SplineGenerator.GetGenerateOutermostDrivingLaneOnly(); }
 
+	// Side filters (forwarded to SplineGenerator)
+	void SetGenerateLeftLanes(bool Val) { SplineGenerator.SetGenerateLeftLanes(Val); }
+	bool GetGenerateLeftLanes() const { return SplineGenerator.GetGenerateLeftLanes(); }
+
+	void SetGenerateRightLanes(bool Val) { SplineGenerator.SetGenerateRightLanes(Val); }
+	bool GetGenerateRightLanes() const { return SplineGenerator.GetGenerateRightLanes(); }
+
+	// Lane position filter (forwarded to SplineGenerator)
+	void SetLanePositionFilter(FSplineGenerator::ELanePositionFilter Val) { SplineGenerator.SetLanePositionFilter(Val); }
+	FSplineGenerator::ELanePositionFilter GetLanePositionFilter() const { return SplineGenerator.GetLanePositionFilter(); }
+
+	void SetSpecificLaneIndex(int32 Val) { SplineGenerator.SetSpecificLaneIndex(Val); }
+	int32 GetSpecificLaneIndex() const { return SplineGenerator.GetSpecificLaneIndex(); }
+
 	// Spline generation mode (forwarded to SplineGenerator)
 	void SetSplineGenerationMode(AOpenDriveLaneSpline::EOpenDriveLaneSplineMode NewMode) { SplineGenerator.SetSplineMode(NewMode); }
 	AOpenDriveLaneSpline::EOpenDriveLaneSplineMode GetSplineGenerationMode() const { return SplineGenerator.GetSplineMode(); }

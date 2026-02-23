@@ -134,6 +134,37 @@ void UOpenDriveEditorSubsystem::SetGenerateOutermostDrivingLaneOnly(bool bOuterm
 	SplineGen.SetGenerateOutermostDrivingLaneOnly(bOutermostOnly);
 }
 
+void UOpenDriveEditorSubsystem::SetGenerateLeftLanes(bool bGenerate)
+{
+	SplineGen.SetGenerateLeftLanes(bGenerate);
+}
+
+void UOpenDriveEditorSubsystem::SetGenerateRightLanes(bool bGenerate)
+{
+	SplineGen.SetGenerateRightLanes(bGenerate);
+}
+
+void UOpenDriveEditorSubsystem::SetLanePositionFilter(int32 FilterMode)
+{
+	switch (FilterMode)
+	{
+	case 0: SplineGen.SetLanePositionFilter(FSplineGenerator::ELanePositionFilter::All); break;
+	case 1: SplineGen.SetLanePositionFilter(FSplineGenerator::ELanePositionFilter::OutermostOnly); break;
+	case 2: SplineGen.SetLanePositionFilter(FSplineGenerator::ELanePositionFilter::OutermostDrivingOnly); break;
+	case 3: SplineGen.SetLanePositionFilter(FSplineGenerator::ELanePositionFilter::InnermostOnly); break;
+	case 4: SplineGen.SetLanePositionFilter(FSplineGenerator::ELanePositionFilter::InnermostDrivingOnly); break;
+	case 5: SplineGen.SetLanePositionFilter(FSplineGenerator::ELanePositionFilter::SpecificIndex); break;
+	default:
+		UE_LOG(LogClass, Warning, TEXT("SetLanePositionFilter: Invalid mode %d. Use 0=All, 1=Outermost, 2=OutermostDriving, 3=Innermost, 4=InnermostDriving, 5=SpecificIndex."), FilterMode);
+		break;
+	}
+}
+
+void UOpenDriveEditorSubsystem::SetSpecificLaneIndex(int32 Index)
+{
+	SplineGen.SetSpecificLaneIndex(Index);
+}
+
 // ==========================================
 // Signal Generation
 // ==========================================
