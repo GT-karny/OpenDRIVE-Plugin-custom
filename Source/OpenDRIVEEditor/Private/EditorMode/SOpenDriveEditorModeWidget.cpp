@@ -321,7 +321,11 @@ TSharedRef<SWidget> SOpenDRIVEEditorModeWidget::ConstructSplineTabContent(const 
 			})
 			.Font(*_fontInfoPtr)
 		];
-	_lanePositionFilterComboBox->SetSelectedItem(_lanePositionFilterOptions[0]);
+	int32 CurrentFilterIndex = (int32)GetEdMode()->GetLanePositionFilter();
+	if (_lanePositionFilterOptions.IsValidIndex(CurrentFilterIndex))
+	{
+		_lanePositionFilterComboBox->SetSelectedItem(_lanePositionFilterOptions[CurrentFilterIndex]);
+	}
 
 	return SNew(SVerticalBox)
 		// Buttons: Gen Splines | Clear Splines
@@ -373,7 +377,7 @@ TSharedRef<SWidget> SOpenDRIVEEditorModeWidget::ConstructSplineTabContent(const 
 						SAssignNew(_specificLaneIndexSpinBox, SSpinBox<int32>)
 							.MinValue(1)
 							.MaxValue(10)
-							.Value(1)
+							.Value(GetEdMode()->GetSpecificLaneIndex())
 							.OnValueCommitted(this, &SOpenDRIVEEditorModeWidget::OnSpecificLaneIndexChanged)
 							.Visibility_Lambda([this]() -> EVisibility
 							{
@@ -393,19 +397,19 @@ TSharedRef<SWidget> SOpenDRIVEEditorModeWidget::ConstructSplineTabContent(const 
 		+ SVerticalBox::Slot().AutoHeight().Padding(5.f, 5.f, 5.f, 0.f)
 		[
 			SNew(SHorizontalBox)
-			+ SHorizontalBox::Slot().AutoWidth().Padding(5) [ SNew(SCheckBox).IsChecked(ECheckBoxState::Checked).OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnGenerateRoadsCheckStateChanged) .Content()[ SNew(STextBlock).Text(FText::FromString("Roads")) ] ]
-			+ SHorizontalBox::Slot().AutoWidth().Padding(5) [ SNew(SCheckBox).IsChecked(ECheckBoxState::Checked).OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnGenerateJunctionsCheckStateChanged) .Content()[ SNew(STextBlock).Text(FText::FromString("Junctions")) ] ]
+			+ SHorizontalBox::Slot().AutoWidth().Padding(5) [ SNew(SCheckBox).IsChecked(GetEdMode()->GetGenerateRoads() ? ECheckBoxState::Checked : ECheckBoxState::Unchecked).OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnGenerateRoadsCheckStateChanged) .Content()[ SNew(STextBlock).Text(FText::FromString("Roads")) ] ]
+			+ SHorizontalBox::Slot().AutoWidth().Padding(5) [ SNew(SCheckBox).IsChecked(GetEdMode()->GetGenerateJunctions() ? ECheckBoxState::Checked : ECheckBoxState::Unchecked).OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnGenerateJunctionsCheckStateChanged) .Content()[ SNew(STextBlock).Text(FText::FromString("Junctions")) ] ]
 			+ SHorizontalBox::Slot().AutoWidth().Padding(5)
 			[
 				SAssignNew(_leftLanesCheckBox, SCheckBox)
-					.IsChecked(ECheckBoxState::Checked)
+					.IsChecked(GetEdMode()->GetGenerateLeftLanes() ? ECheckBoxState::Checked : ECheckBoxState::Unchecked)
 					.OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnLeftLanesCheckStateChanged)
 					.Content()[ SNew(STextBlock).Text(FText::FromString("Left")) ]
 			]
 			+ SHorizontalBox::Slot().AutoWidth().Padding(5)
 			[
 				SAssignNew(_rightLanesCheckBox, SCheckBox)
-					.IsChecked(ECheckBoxState::Checked)
+					.IsChecked(GetEdMode()->GetGenerateRightLanes() ? ECheckBoxState::Checked : ECheckBoxState::Unchecked)
 					.OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnRightLanesCheckStateChanged)
 					.Content()[ SNew(STextBlock).Text(FText::FromString("Right")) ]
 			]
@@ -432,23 +436,23 @@ TSharedRef<SWidget> SOpenDRIVEEditorModeWidget::ConstructSplineTabContent(const 
 		+ SVerticalBox::Slot().AutoHeight().Padding(5.f, 2.f, 5.f, 0.f)
 		[
 			SNew(SHorizontalBox)
-			+ SHorizontalBox::Slot().FillWidth(1.f / 3.f).Padding(5, 2) [ SAssignNew(_drivingCheckBox, SCheckBox).IsChecked(ECheckBoxState::Checked).OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnDrivingLaneCheckStateChanged) .Content()[ SNew(STextBlock).Text(FText::FromString("Driving")) ] ]
-			+ SHorizontalBox::Slot().FillWidth(1.f / 3.f).Padding(5, 2) [ SAssignNew(_sidewalkCheckBox, SCheckBox).IsChecked(ECheckBoxState::Checked).OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnSidewalkLaneCheckStateChanged) .Content()[ SNew(STextBlock).Text(FText::FromString("Sidewalk")) ] ]
-			+ SHorizontalBox::Slot().FillWidth(1.f / 3.f).Padding(5, 2) [ SAssignNew(_bikingCheckBox, SCheckBox).IsChecked(ECheckBoxState::Checked).OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnBikingLaneCheckStateChanged) .Content()[ SNew(STextBlock).Text(FText::FromString("Biking")) ] ]
+			+ SHorizontalBox::Slot().FillWidth(1.f / 3.f).Padding(5, 2) [ SAssignNew(_drivingCheckBox, SCheckBox).IsChecked(GetEdMode()->GetGenerateDrivingLane() ? ECheckBoxState::Checked : ECheckBoxState::Unchecked).OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnDrivingLaneCheckStateChanged) .Content()[ SNew(STextBlock).Text(FText::FromString("Driving")) ] ]
+			+ SHorizontalBox::Slot().FillWidth(1.f / 3.f).Padding(5, 2) [ SAssignNew(_sidewalkCheckBox, SCheckBox).IsChecked(GetEdMode()->GetGenerateSidewalkLane() ? ECheckBoxState::Checked : ECheckBoxState::Unchecked).OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnSidewalkLaneCheckStateChanged) .Content()[ SNew(STextBlock).Text(FText::FromString("Sidewalk")) ] ]
+			+ SHorizontalBox::Slot().FillWidth(1.f / 3.f).Padding(5, 2) [ SAssignNew(_bikingCheckBox, SCheckBox).IsChecked(GetEdMode()->GetGenerateBikingLane() ? ECheckBoxState::Checked : ECheckBoxState::Unchecked).OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnBikingLaneCheckStateChanged) .Content()[ SNew(STextBlock).Text(FText::FromString("Biking")) ] ]
 		]
 		+ SVerticalBox::Slot().AutoHeight().Padding(5.f, 0.f, 5.f, 0.f)
 		[
 			SNew(SHorizontalBox)
-			+ SHorizontalBox::Slot().FillWidth(1.f / 3.f).Padding(5, 2) [ SAssignNew(_parkingCheckBox, SCheckBox).IsChecked(ECheckBoxState::Checked).OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnParkingLaneCheckStateChanged) .Content()[ SNew(STextBlock).Text(FText::FromString("Parking")) ] ]
-			+ SHorizontalBox::Slot().FillWidth(1.f / 3.f).Padding(5, 2) [ SAssignNew(_shoulderCheckBox, SCheckBox).IsChecked(ECheckBoxState::Checked).OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnShoulderLaneCheckStateChanged) .Content()[ SNew(STextBlock).Text(FText::FromString("Shoulder")) ] ]
-			+ SHorizontalBox::Slot().FillWidth(1.f / 3.f).Padding(5, 2) [ SAssignNew(_restrictedCheckBox, SCheckBox).IsChecked(ECheckBoxState::Checked).OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnRestrictedLaneCheckStateChanged) .Content()[ SNew(STextBlock).Text(FText::FromString("Restricted")) ] ]
+			+ SHorizontalBox::Slot().FillWidth(1.f / 3.f).Padding(5, 2) [ SAssignNew(_parkingCheckBox, SCheckBox).IsChecked(GetEdMode()->GetGenerateParkingLane() ? ECheckBoxState::Checked : ECheckBoxState::Unchecked).OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnParkingLaneCheckStateChanged) .Content()[ SNew(STextBlock).Text(FText::FromString("Parking")) ] ]
+			+ SHorizontalBox::Slot().FillWidth(1.f / 3.f).Padding(5, 2) [ SAssignNew(_shoulderCheckBox, SCheckBox).IsChecked(GetEdMode()->GetGenerateShoulderLane() ? ECheckBoxState::Checked : ECheckBoxState::Unchecked).OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnShoulderLaneCheckStateChanged) .Content()[ SNew(STextBlock).Text(FText::FromString("Shoulder")) ] ]
+			+ SHorizontalBox::Slot().FillWidth(1.f / 3.f).Padding(5, 2) [ SAssignNew(_restrictedCheckBox, SCheckBox).IsChecked(GetEdMode()->GetGenerateRestrictedLane() ? ECheckBoxState::Checked : ECheckBoxState::Unchecked).OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnRestrictedLaneCheckStateChanged) .Content()[ SNew(STextBlock).Text(FText::FromString("Restricted")) ] ]
 		]
 		+ SVerticalBox::Slot().AutoHeight().Padding(5.f, 0.f, 5.f, 10.f)
 		[
 			SNew(SHorizontalBox)
-			+ SHorizontalBox::Slot().FillWidth(1.f / 3.f).Padding(5, 2) [ SAssignNew(_medianCheckBox, SCheckBox).IsChecked(ECheckBoxState::Checked).OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnMedianLaneCheckStateChanged) .Content()[ SNew(STextBlock).Text(FText::FromString("Median")) ] ]
-			+ SHorizontalBox::Slot().FillWidth(1.f / 3.f).Padding(5, 2) [ SAssignNew(_otherCheckBox, SCheckBox).IsChecked(ECheckBoxState::Checked).OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnOtherLaneCheckStateChanged) .Content()[ SNew(STextBlock).Text(FText::FromString("Other")) ] ]
-			+ SHorizontalBox::Slot().FillWidth(1.f / 3.f).Padding(5, 2) [ SAssignNew(_referenceCheckBox, SCheckBox).IsChecked(ECheckBoxState::Checked).OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnReferenceLaneCheckStateChanged) .Content()[ SNew(STextBlock).Text(FText::FromString("Reference")) ] ]
+			+ SHorizontalBox::Slot().FillWidth(1.f / 3.f).Padding(5, 2) [ SAssignNew(_medianCheckBox, SCheckBox).IsChecked(GetEdMode()->GetGenerateMedianLane() ? ECheckBoxState::Checked : ECheckBoxState::Unchecked).OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnMedianLaneCheckStateChanged) .Content()[ SNew(STextBlock).Text(FText::FromString("Median")) ] ]
+			+ SHorizontalBox::Slot().FillWidth(1.f / 3.f).Padding(5, 2) [ SAssignNew(_otherCheckBox, SCheckBox).IsChecked(GetEdMode()->GetGenerateOtherLane() ? ECheckBoxState::Checked : ECheckBoxState::Unchecked).OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnOtherLaneCheckStateChanged) .Content()[ SNew(STextBlock).Text(FText::FromString("Other")) ] ]
+			+ SHorizontalBox::Slot().FillWidth(1.f / 3.f).Padding(5, 2) [ SAssignNew(_referenceCheckBox, SCheckBox).IsChecked(GetEdMode()->GetGenerateReferenceLane() ? ECheckBoxState::Checked : ECheckBoxState::Unchecked).OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnReferenceLaneCheckStateChanged) .Content()[ SNew(STextBlock).Text(FText::FromString("Reference")) ] ]
 		];
 }
 
@@ -474,7 +478,7 @@ TSharedRef<SWidget> SOpenDRIVEEditorModeWidget::ConstructSignalTabContent(const 
 			+ SHorizontalBox::Slot().AutoWidth().Padding(5)
 			[
 				SAssignNew(_generateSignalsCheckBox, SCheckBox)
-					.IsChecked(ECheckBoxState::Checked)
+					.IsChecked(GetEdMode()->SignalGenerator.GetGenerateSignals() ? ECheckBoxState::Checked : ECheckBoxState::Unchecked)
 					.OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnGenerateSignalsCheckStateChanged)
 					.Content()
 					[
@@ -484,7 +488,7 @@ TSharedRef<SWidget> SOpenDRIVEEditorModeWidget::ConstructSignalTabContent(const 
 			+ SHorizontalBox::Slot().AutoWidth().Padding(15, 0, 5, 0)
 			[
 				SAssignNew(_flipSignalOrientationCheckBox, SCheckBox)
-					.IsChecked(ECheckBoxState::Unchecked)
+					.IsChecked(GetEdMode()->SignalGenerator.GetFlipSignalOrientation() ? ECheckBoxState::Checked : ECheckBoxState::Unchecked)
 					.OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnFlipSignalOrientationCheckStateChanged)
 					.Content()
 					[
@@ -516,7 +520,7 @@ TSharedRef<SWidget> SOpenDRIVEEditorModeWidget::ConstructSignalTabContent(const 
 		+ SVerticalBox::Slot().AutoHeight().Padding(5.f, 5.f, 0.f, 0.f)
 		[
 			SAssignNew(_enableAssemblyCheckBox, SCheckBox)
-				.IsChecked(ECheckBoxState::Unchecked)
+				.IsChecked(GetEdMode()->SignalGenerator.GetEnableAssembly() ? ECheckBoxState::Checked : ECheckBoxState::Unchecked)
 				.OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnEnableAssemblyCheckStateChanged)
 				.Content()
 				[
@@ -538,13 +542,13 @@ TSharedRef<SWidget> SOpenDRIVEEditorModeWidget::ConstructSignalTabContent(const 
 				SNew(SSpinBox<float>)
 					.MinValue(0.1f)
 					.MaxValue(50.0f)
-					.Value(5.0f)
+					.Value(GetEdMode()->SignalGenerator.GetAssemblyDistanceThreshold())
 					.OnValueChanged(this, &SOpenDRIVEEditorModeWidget::OnAssemblyDistanceThresholdChanged)
 			]
 			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(5, 0, 0, 0)
 			[
 				SAssignNew(_assemblyDistanceTextPtr, STextBlock)
-					.Text(FText::FromString("5.0"))
+					.Text(FText::FromString(FString::Printf(TEXT("%.1f"), GetEdMode()->SignalGenerator.GetAssemblyDistanceThreshold())))
 					.Font(*_fontInfoPtr)
 			]
 		]
@@ -563,13 +567,13 @@ TSharedRef<SWidget> SOpenDRIVEEditorModeWidget::ConstructSignalTabContent(const 
 				SNew(SSpinBox<float>)
 					.MinValue(1.0f)
 					.MaxValue(90.0f)
-					.Value(15.0f)
+					.Value(GetEdMode()->SignalGenerator.GetAssemblyHeadingTolerance())
 					.OnValueChanged(this, &SOpenDRIVEEditorModeWidget::OnAssemblyHeadingToleranceChanged)
 			]
 			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(5, 0, 0, 0)
 			[
 				SAssignNew(_assemblyHeadingTextPtr, STextBlock)
-					.Text(FText::FromString("15.0"))
+					.Text(FText::FromString(FString::Printf(TEXT("%.1f"), GetEdMode()->SignalGenerator.GetAssemblyHeadingTolerance())))
 					.Font(*_fontInfoPtr)
 			]
 		]
