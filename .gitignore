@@ -8,3 +8,6 @@ Packaged
 *.ilk
 *.exp
 *.pdb
+
+# Local-only OpenDRIVE specification files (not tracked in git)
+ThirdParty/OpenDRIVE/
