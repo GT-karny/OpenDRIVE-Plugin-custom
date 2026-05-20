@@ -58,6 +58,11 @@ protected :
 	TSharedRef<SWidget> ConstructSignalTabContent(const FArguments& InArgs);
 
 	/**
+	 * Constructs the Landscape tab content (sculpt / spline generation onto selected landscape)
+	 */
+	TSharedRef<SWidget> ConstructLandscapeTabContent(const FArguments& InArgs);
+
+	/**
 	* Link the Generate() function in the OpenDRIVEEditorMode.cpp file
 	*/
 	FReply Generate();
@@ -203,7 +208,17 @@ protected :
 	*/
 	void OnAssemblyMappingAssetSelected(const FAssetData& AssetData);
 
-private : 
+	// === Landscape integration ===
+
+	FReply OnSculptLandscapeClicked();
+	FReply OnCreateLandscapeSplinesClicked();
+	void OnLandscapeZOffsetChanged(float NewValue);
+	void OnLandscapeFalloffChanged(float NewValue);
+	void OnLandscapeLayerNameCommitted(const FText& NewText, ETextCommit::Type CommitType);
+	FString GetLandscapePaintLayerPath() const;
+	void OnLandscapePaintLayerSelected(const FAssetData& AssetData);
+
+private :
 
 	// Tab system
 	int32 _activeTabIndex = 0;

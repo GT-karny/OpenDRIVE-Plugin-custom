@@ -4,6 +4,8 @@
 #include "Public/SplineGenerator.h"
 #include "SignalTypeMapping.h"
 #include "SignalAssemblyMapping.h"
+#include "LandscapeLayerInfoObject.h"
+#include "Widgets/Input/SEditableTextBox.h"
 
 void SOpenDRIVEEditorModeWidget::Construct(const FArguments& InArgs)
 {
@@ -32,6 +34,7 @@ void SOpenDRIVEEditorModeWidget::Construct(const FArguments& InArgs)
 				+ SWidgetSwitcher::Slot() [ ConstructRoadTabContent(InArgs) ]
 				+ SWidgetSwitcher::Slot() [ ConstructSplineTabContent(InArgs) ]
 				+ SWidgetSwitcher::Slot() [ ConstructSignalTabContent(InArgs) ]
+				+ SWidgetSwitcher::Slot() [ ConstructLandscapeTabContent(InArgs) ]
 			]
 		]
 		// Lane Info (always visible)
@@ -59,7 +62,9 @@ TSharedRef<SWidget> SOpenDRIVEEditorModeWidget::ConstructTabBar(const FArguments
 		+ SSegmentedControl<int32>::Slot(1)
 			.Text(FText::FromString("Spline"))
 		+ SSegmentedControl<int32>::Slot(2)
-			.Text(FText::FromString("Signal"));
+			.Text(FText::FromString("Signal"))
+		+ SSegmentedControl<int32>::Slot(3)
+			.Text(FText::FromString("Landscape"));
 }
 
 TSharedRef<SBorder> SOpenDRIVEEditorModeWidget::ConstructLaneInfoBox(const FArguments& InArgs)
@@ -884,5 +889,155 @@ void SOpenDRIVEEditorModeWidget::OnAssemblyMappingAssetSelected(const FAssetData
 {
 	USignalAssemblyMapping* Asset = Cast<USignalAssemblyMapping>(AssetData.GetAsset());
 	GetEdMode()->SignalGenerator.SetSignalAssemblyMappingAsset(Asset);
+}
+
+// ============================================================================
+// Landscape tab
+// ============================================================================
+
+TSharedRef<SWidget> SOpenDRIVEEditorModeWidget::ConstructLandscapeTabContent(const FArguments& InArgs)
+{
+	FOpenDRIVEEditorMode* Ed = GetEdMode();
+
+	TSharedPtr<SButton> sculptButton = SNew(SButton).Text(FText::FromString("Sculpt Selected Landscape"))
+		.OnClicked(this, &SOpenDRIVEEditorModeWidget::OnSculptLandscapeClicked)
+		.IsEnabled(this, &SOpenDRIVEEditorModeWidget::CheckIfInEditorMode)
+		.ToolTipText(FText::FromString(TEXT(
+			"Deforms the currently selected Landscape so it follows the OpenDRIVE roads.\n"
+			"Requires EUBP_OpenDrive2Landscape (BP utility) to be present in plugin Content.\n"
+			"Select a Landscape actor in the level before clicking.")));
+	StaticCast<STextBlock&>(sculptButton.ToSharedRef().Get().GetContent().Get()).SetJustification(ETextJustify::Center);
+
+	TSharedPtr<SButton> splinesButton = SNew(SButton).Text(FText::FromString("Create & Bake Splines"))
+		.OnClicked(this, &SOpenDRIVEEditorModeWidget::OnCreateLandscapeSplinesClicked)
+		.IsEnabled(this, &SOpenDRIVEEditorModeWidget::CheckIfInEditorMode)
+		.ToolTipText(FText::FromString(TEXT(
+			"Generates Landscape Spline control points & segments from every OpenDRIVE road, "
+			"then automatically bakes them to the heightmap.\n\n"
+			"If the Landscape has Edit Layers enabled, a dedicated layer named \"OpenDRIVE Roads\" "
+			"is created (or reused) with AlphaBlend mode, so the road Z overrides other layers "
+			"instead of stacking on top of them.")));
+	StaticCast<STextBlock&>(splinesButton.ToSharedRef().Get().GetContent().Get()).SetJustification(ETextJustify::Center);
+
+	return SNew(SVerticalBox)
+		// Buttons row
+		+ SVerticalBox::Slot().AutoHeight().Padding(5.f, 5.f, 5.f, 0.f)
+		[
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().FillWidth(0.5f).Padding(0, 0, 5, 0) [ sculptButton.ToSharedRef() ]
+			+ SHorizontalBox::Slot().FillWidth(0.5f).Padding(5, 0, 0, 0) [ splinesButton.ToSharedRef() ]
+		]
+		+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 10.f, 0.f, 0.f).HAlign(HAlign_Center) [ SNew(SSeparator) ]
+		// Z Offset
+		+ SVerticalBox::Slot().AutoHeight().Padding(5.f, 5.f, 5.f, 0.f)
+		[
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(5)
+			[
+				SNew(STextBlock).Text(FText::FromString("Z Offset (cm):")).Font(*_fontInfoPtr)
+				.ToolTipText(FText::FromString(TEXT("Negative dips the road below the landscape surface (avoids Z-fighting).")))
+			]
+			+ SHorizontalBox::Slot().FillWidth(1.f).Padding(5)
+			[
+				// MinSliderValue/MaxSliderValue bound the drag range only; typed input is
+				// unbounded (MinValue/MaxValue intentionally omitted).
+				SNew(SSpinBox<float>)
+					.MinSliderValue(-200.f).MaxSliderValue(200.f)
+					.Value(Ed->GetLandscapeZOffset())
+					.OnValueChanged(this, &SOpenDRIVEEditorModeWidget::OnLandscapeZOffsetChanged)
+			]
+		]
+		// Falloff
+		+ SVerticalBox::Slot().AutoHeight().Padding(5.f, 5.f, 5.f, 0.f)
+		[
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(5)
+			[
+				SNew(STextBlock).Text(FText::FromString("Falloff (cm):")).Font(*_fontInfoPtr)
+				.ToolTipText(FText::FromString(TEXT("Lateral distance over which the landscape transitions from road height to its natural height.")))
+			]
+			+ SHorizontalBox::Slot().FillWidth(1.f).Padding(5)
+			[
+				// Drag range capped to 0..2000 for ergonomic feel; MinValue=0 prevents
+				// nonsensical negative falloff via typed input, but the upper bound is
+				// open so you can type arbitrarily large values.
+				SNew(SSpinBox<float>)
+					.MinValue(0.f)
+					.MinSliderValue(0.f).MaxSliderValue(2000.f)
+					.Value(Ed->GetLandscapeFalloff())
+					.OnValueChanged(this, &SOpenDRIVEEditorModeWidget::OnLandscapeFalloffChanged)
+			]
+		]
+		// Layer name
+		+ SVerticalBox::Slot().AutoHeight().Padding(5.f, 5.f, 5.f, 0.f)
+		[
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(5)
+			[
+				SNew(STextBlock).Text(FText::FromString("Layer Name:")).Font(*_fontInfoPtr)
+				.ToolTipText(FText::FromString(TEXT("Landscape paint layer name to apply under the road. Pair with Paint Layer below.")))
+			]
+			+ SHorizontalBox::Slot().FillWidth(1.f).Padding(5)
+			[
+				SNew(SEditableTextBox)
+					.Text(FText::FromName(Ed->GetLandscapeLayerName()))
+					.OnTextCommitted(this, &SOpenDRIVEEditorModeWidget::OnLandscapeLayerNameCommitted)
+			]
+		]
+		// Paint layer asset picker
+		+ SVerticalBox::Slot().AutoHeight().Padding(5.f, 5.f, 5.f, 10.f)
+		[
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(5)
+			[
+				SNew(STextBlock).Text(FText::FromString("Paint Layer:")).Font(*_fontInfoPtr)
+				.ToolTipText(FText::FromString(TEXT("Optional: LandscapeLayerInfoObject to paint along the sculpted road.")))
+			]
+			+ SHorizontalBox::Slot().FillWidth(1.f).Padding(5)
+			[
+				SNew(SObjectPropertyEntryBox)
+					.AllowedClass(ULandscapeLayerInfoObject::StaticClass())
+					.ObjectPath(this, &SOpenDRIVEEditorModeWidget::GetLandscapePaintLayerPath)
+					.OnObjectChanged(this, &SOpenDRIVEEditorModeWidget::OnLandscapePaintLayerSelected)
+			]
+		];
+}
+
+FReply SOpenDRIVEEditorModeWidget::OnSculptLandscapeClicked()
+{
+	GetEdMode()->LandscapeSculptSelected();
+	return FReply::Handled();
+}
+
+FReply SOpenDRIVEEditorModeWidget::OnCreateLandscapeSplinesClicked()
+{
+	GetEdMode()->LandscapeCreateSplinesOnSelected();
+	return FReply::Handled();
+}
+
+void SOpenDRIVEEditorModeWidget::OnLandscapeZOffsetChanged(float NewValue)
+{
+	GetEdMode()->SetLandscapeZOffset(NewValue);
+}
+
+void SOpenDRIVEEditorModeWidget::OnLandscapeFalloffChanged(float NewValue)
+{
+	GetEdMode()->SetLandscapeFalloff(NewValue);
+}
+
+void SOpenDRIVEEditorModeWidget::OnLandscapeLayerNameCommitted(const FText& NewText, ETextCommit::Type CommitType)
+{
+	GetEdMode()->SetLandscapeLayerName(FName(*NewText.ToString()));
+}
+
+FString SOpenDRIVEEditorModeWidget::GetLandscapePaintLayerPath() const
+{
+	ULandscapeLayerInfoObject* L = GetEdMode()->GetLandscapePaintLayer();
+	return L ? L->GetPathName() : FString();
+}
+
+void SOpenDRIVEEditorModeWidget::OnLandscapePaintLayerSelected(const FAssetData& AssetData)
+{
+	GetEdMode()->SetLandscapePaintLayer(Cast<ULandscapeLayerInfoObject>(AssetData.GetAsset()));
 }
 

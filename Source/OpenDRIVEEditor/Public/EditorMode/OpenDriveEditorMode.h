@@ -6,6 +6,8 @@
 #include "../SignalGenerator.h"
 #include "../SplineGenerator.h"
 
+class ULandscapeLayerInfoObject;
+
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnLaneSelected, AOpenDriveEditorLane* road)
 
 class FOpenDRIVEEditorMode : public FEdMode
@@ -149,6 +151,29 @@ public :
 	void ClearGeneratedSignals() { SignalGenerator.ClearGeneratedSignals(); }
 	FSignalGenerator& GetSignalGenerator() { return SignalGenerator; }
 
+	// === Landscape integration (delegates to UOpenDrive2Landscape BP utility) ===
+
+	/** Sculpt the currently selected Landscape(s) to follow the OpenDRIVE roads.
+	 *  Requires the BP utility EUBP_OpenDrive2Landscape (provides ApplySpline impl). */
+	void LandscapeSculptSelected();
+
+	/** Create Landscape Splines on the currently selected Landscape from OpenDRIVE roads.
+	 *  Pure-C++ path; the Landscape's built-in Spline tools can then bake the heightmap. */
+	void LandscapeCreateSplinesOnSelected();
+
+	void SetLandscapeZOffset(float V) { _landscapeZOffset = V; }
+	float GetLandscapeZOffset() const { return _landscapeZOffset; }
+
+	void SetLandscapeFalloff(float V) { _landscapeFalloff = V; }
+	float GetLandscapeFalloff() const { return _landscapeFalloff; }
+
+	void SetLandscapeLayerName(FName V) { _landscapeLayerName = V; }
+	FName GetLandscapeLayerName() const { return _landscapeLayerName; }
+
+	// Defined in .cpp so TWeakObjectPtr<ULandscapeLayerInfoObject> instantiations see the full type.
+	void SetLandscapePaintLayer(ULandscapeLayerInfoObject* V);
+	ULandscapeLayerInfoObject* GetLandscapePaintLayer() const;
+
 protected :
 
 	/**
@@ -165,6 +190,12 @@ private :
 	float _roadOffset = 20.0f;
 	float _step = 5.f;
 	bool bHasBeenLoaded = false;
+
+	// Landscape integration parameters
+	float _landscapeZOffset = -10.f;
+	float _landscapeFalloff = 100.f;
+	FName _landscapeLayerName = FName(TEXT("Layer"));
+	TWeakObjectPtr<ULandscapeLayerInfoObject> _landscapePaintLayer;
 
 	FDelegateHandle MapOpenedDelegateHandle;
 	/**

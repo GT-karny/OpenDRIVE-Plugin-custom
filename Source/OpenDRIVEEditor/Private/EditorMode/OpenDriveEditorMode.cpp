@@ -7,6 +7,16 @@
 #include "RoadManager.hpp"
 #include "CoordTranslate.h"
 
+#include "OpenDrive2Landscape.h"
+#include "LandscapeProxy.h"
+#include "LandscapeLayerInfoObject.h"
+#include "Editor.h"
+#include "Engine/Selection.h"
+#include "Framework/Notifications/NotificationManager.h"
+#include "Widgets/Notifications/SNotificationList.h"
+
+DEFINE_LOG_CATEGORY_STATIC(LogOpenDriveLandscapeIntegration, Log, All);
+
 const FEditorModeID FOpenDRIVEEditorMode::EM_RoadMode(TEXT("EM_RoadMode"));
 
 FOpenDRIVEEditorMode::FOpenDRIVEEditorMode()
@@ -168,6 +178,100 @@ void FOpenDRIVEEditorMode::SetRoadsArrowsVisibilityInEditor(bool bIsVisible)
 			road->SetArrowVisibility(bIsVisible);
 		}
 	}
+}
+
+namespace
+{
+	// Pop a transient editor notification (top-right) so the user sees the result.
+	void Notify(const FString& Msg, bool bSuccess)
+	{
+		FNotificationInfo Info(FText::FromString(Msg));
+		Info.ExpireDuration = 4.f;
+		Info.bUseSuccessFailIcons = true;
+		TSharedPtr<SNotificationItem> Item = FSlateNotificationManager::Get().AddNotification(Info);
+		if (Item.IsValid())
+		{
+			Item->SetCompletionState(bSuccess ? SNotificationItem::CS_Success : SNotificationItem::CS_Fail);
+		}
+	}
+
+	// Load and instantiate the BP utility EUBP_OpenDrive2Landscape so we can call its
+	// SculptLandscape (which dispatches the BP-implemented ApplySpline).
+	UOpenDrive2Landscape* MakeLandscapeUtilityInstance()
+	{
+		// Plugin Content mount: /OpenDRIVE/. BP-generated class suffix: _C.
+		static const TCHAR* BPClassPath = TEXT("/OpenDRIVE/EUBP_OpenDrive2Landscape.EUBP_OpenDrive2Landscape_C");
+		UClass* BPClass = LoadClass<UOpenDrive2Landscape>(nullptr, BPClassPath);
+		if (!BPClass)
+		{
+			UE_LOG(LogOpenDriveLandscapeIntegration, Warning,
+				TEXT("Could not load BP class '%s'. Plugin Content may be missing."), BPClassPath);
+			return nullptr;
+		}
+		return NewObject<UOpenDrive2Landscape>(GetTransientPackage(), BPClass);
+	}
+
+	// Returns true if at least one Landscape is currently selected in the level editor.
+	bool HasLandscapeSelected()
+	{
+		if (!GEditor) return false;
+		if (USelection* Sel = GEditor->GetSelectedActors())
+		{
+			for (FSelectionIterator It(*Sel); It; ++It)
+			{
+				if (Cast<ALandscapeProxy>(*It)) return true;
+			}
+		}
+		return false;
+	}
+}
+
+void FOpenDRIVEEditorMode::SetLandscapePaintLayer(ULandscapeLayerInfoObject* V)
+{
+	_landscapePaintLayer = V;
+}
+
+ULandscapeLayerInfoObject* FOpenDRIVEEditorMode::GetLandscapePaintLayer() const
+{
+	return _landscapePaintLayer.Get();
+}
+
+void FOpenDRIVEEditorMode::LandscapeSculptSelected()
+{
+	if (!HasLandscapeSelected())
+	{
+		Notify(TEXT("Select a Landscape actor in the level first."), false);
+		return;
+	}
+
+	UOpenDrive2Landscape* Util = MakeLandscapeUtilityInstance();
+	if (!Util)
+	{
+		Notify(TEXT("Failed to load EUBP_OpenDrive2Landscape. Is the plugin Content present?"), false);
+		return;
+	}
+
+	Util->SculptLandscape(_landscapeZOffset, _landscapeFalloff, _landscapePaintLayer.Get(), _landscapeLayerName);
+	Notify(TEXT("Sculpted Landscape from OpenDRIVE roads."), true);
+}
+
+void FOpenDRIVEEditorMode::LandscapeCreateSplinesOnSelected()
+{
+	if (!HasLandscapeSelected())
+	{
+		Notify(TEXT("Select a Landscape actor in the level first."), false);
+		return;
+	}
+
+	UOpenDrive2Landscape* Util = MakeLandscapeUtilityInstance();
+	if (!Util)
+	{
+		Notify(TEXT("Failed to load EUBP_OpenDrive2Landscape. Is the plugin Content present?"), false);
+		return;
+	}
+
+	Util->CreateRoadSplines(_landscapeZOffset, _landscapeFalloff, _landscapePaintLayer.Get(), _landscapeLayerName);
+	Notify(TEXT("Created Landscape Splines from OpenDRIVE roads."), true);
 }
 
 void FOpenDRIVEEditorMode::OnActorSelected(UObject* selectedObject)
