@@ -4,6 +4,7 @@
 #include "EditorSubsystem.h"
 #include "SplineGenerator.h"
 #include "SignalGenerator.h"
+#include "RoadMeshGenerator.h"
 #include "OpenDriveEditorSubsystem.generated.h"
 
 class USignalTypeMapping;
@@ -115,6 +116,54 @@ public:
 	void SetSpecificLaneIndex(int32 Index);
 
 	// ==========================================
+	// Road Mesh Generation
+	// ==========================================
+
+	/** Loads an OpenDRIVE .xodr file directly into the roadmanager (bypasses WorldSettings). Test helper. */
+	UFUNCTION(BlueprintCallable, Category = "OpenDRIVE|RoadMesh")
+	bool LoadXodrFile(const FString& AbsoluteFilePath);
+
+	/** Generates the road mesh (UDynamicMeshComponent based ARoadMeshActor) from the loaded OpenDRIVE. */
+	UFUNCTION(BlueprintCallable, Category = "OpenDRIVE|RoadMesh")
+	FString GenerateRoadMesh();
+
+	/** Destroy any previously generated ARoadMeshActor. */
+	UFUNCTION(BlueprintCallable, Category = "OpenDRIVE|RoadMesh")
+	void ClearGeneratedRoadMeshes();
+
+	/** Set the maximum step (m) for s-sampling. */
+	UFUNCTION(BlueprintCallable, Category = "OpenDRIVE|RoadMesh")
+	void SetRoadMeshMaxStep(float MaxStepMeters);
+
+	/** Set the Z offset (cm) added to the road surface. */
+	UFUNCTION(BlueprintCallable, Category = "OpenDRIVE|RoadMesh")
+	void SetRoadMeshZOffset(float ZOffsetCm);
+
+	/** Set the Z offset (cm) for road markings above the road surface (default 0.05). */
+	UFUNCTION(BlueprintCallable, Category = "OpenDRIVE|RoadMesh")
+	void SetRoadMeshMarkingZOffset(float MarkingZOffsetCm);
+
+	/** Assign material slot 0..N for ERoadMeshMaterialSlot. */
+	UFUNCTION(BlueprintCallable, Category = "OpenDRIVE|RoadMesh")
+	void SetRoadMeshMaterials(const TArray<UMaterialInterface*>& Materials);
+
+	/** Override the Content folder used for auto-discovery (default: /Game/RoadGeneration/Material). */
+	UFUNCTION(BlueprintCallable, Category = "OpenDRIVE|RoadMesh")
+	void SetRoadMeshMaterialFolder(const FString& ContentPath);
+
+	/** Enable complex-as-simple collision on every generated road mesh actor. */
+	UFUNCTION(BlueprintCallable, Category = "OpenDRIVE|RoadMesh")
+	void EnableRoadMeshCollision();
+
+	/**
+	 * Bake the most recently generated road mesh actor's DynamicMesh into a UStaticMesh asset.
+	 * @param AssetPath Package path including asset name, e.g. "/Game/Roads/SM_Road"
+	 * @return The created asset (or nullptr).
+	 */
+	UFUNCTION(BlueprintCallable, Category = "OpenDRIVE|RoadMesh")
+	class UStaticMesh* BakeRoadMeshToStaticMesh(const FString& AssetPath);
+
+	// ==========================================
 	// Signal Generation
 	// ==========================================
 
@@ -134,4 +183,5 @@ private:
 
 	FSplineGenerator SplineGen;
 	FSignalGenerator SignalGen;
+	FRoadMeshGenerator MeshGen;
 };

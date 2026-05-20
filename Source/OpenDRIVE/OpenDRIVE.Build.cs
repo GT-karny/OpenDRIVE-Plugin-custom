@@ -14,7 +14,9 @@ public class OpenDRIVE : ModuleRules
 				"Core",
 				"OpenDRIVELoader",
 				"RoadManager",
-				"Projects"
+				"Projects",
+				"GeometryFramework",
+				"GeometryCore"
 			}
 		);
 

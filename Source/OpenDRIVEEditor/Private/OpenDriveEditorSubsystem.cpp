@@ -2,6 +2,19 @@
 #include "SignalTypeMapping.h"
 #include "OpenDriveWorldSettings.h"
 #include "OpenDriveAsset.h"
+#include "RoadMeshActor.h"
+#include "RoadManager.hpp"
+#include "Misc/FileHelper.h"
+#include "Misc/Paths.h"
+#include "Misc/PackageName.h"
+#include "Engine/StaticMesh.h"
+#include "AssetRegistry/AssetRegistryModule.h"
+#include "AssetToolsModule.h"
+#include "PackageTools.h"
+#include "UObject/SavePackage.h"
+#include "Components/DynamicMeshComponent.h"
+#include "UDynamicMesh.h"
+#include "GeometryScript/MeshAssetFunctions.h"
 
 // ==========================================
 // OpenDRIVE Asset Setup
@@ -163,6 +176,148 @@ void UOpenDriveEditorSubsystem::SetLanePositionFilter(int32 FilterMode)
 void UOpenDriveEditorSubsystem::SetSpecificLaneIndex(int32 Index)
 {
 	SplineGen.SetSpecificLaneIndex(Index);
+}
+
+// ==========================================
+// Road Mesh Generation
+// ==========================================
+
+bool UOpenDriveEditorSubsystem::LoadXodrFile(const FString& AbsoluteFilePath)
+{
+	FString Content;
+	if (!FFileHelper::LoadFileToString(Content, *AbsoluteFilePath))
+	{
+		UE_LOG(LogClass, Warning, TEXT("LoadXodrFile: failed to read '%s'"), *AbsoluteFilePath);
+		return false;
+	}
+
+	roadmanager::OpenDrive* Odr = roadmanager::Position::GetOpenDrive();
+	if (!Odr)
+	{
+		UE_LOG(LogClass, Warning, TEXT("LoadXodrFile: roadmanager OpenDrive instance is null"));
+		return false;
+	}
+
+	const bool bOk = Odr->LoadOpenDriveContent(TCHAR_TO_UTF8(*Content));
+	UE_LOG(LogClass, Log, TEXT("LoadXodrFile: '%s' -> %s (roads=%d)"),
+		*AbsoluteFilePath,
+		bOk ? TEXT("OK") : TEXT("FAILED"),
+		(int)Odr->GetNumOfRoads());
+	return bOk;
+}
+
+FString UOpenDriveEditorSubsystem::GenerateRoadMesh()
+{
+	UWorld* World = GEditor->GetEditorWorldContext().World();
+	MeshGen.GenerateRoadMesh(World);
+	return MeshGen.GetLastReport();
+}
+
+void UOpenDriveEditorSubsystem::ClearGeneratedRoadMeshes()
+{
+	MeshGen.ClearGeneratedMeshes();
+}
+
+void UOpenDriveEditorSubsystem::SetRoadMeshMaxStep(float MaxStepMeters)
+{
+	MeshGen.Settings.MaxStepMeters = MaxStepMeters;
+}
+
+void UOpenDriveEditorSubsystem::SetRoadMeshZOffset(float ZOffsetCm)
+{
+	MeshGen.Settings.ZOffsetCm = ZOffsetCm;
+}
+
+void UOpenDriveEditorSubsystem::SetRoadMeshMarkingZOffset(float MarkingZOffsetCm)
+{
+	MeshGen.Settings.MarkingZOffsetCm = MarkingZOffsetCm;
+}
+
+void UOpenDriveEditorSubsystem::SetRoadMeshMaterials(const TArray<UMaterialInterface*>& Materials)
+{
+	MeshGen.Settings.Materials = Materials;
+}
+
+void UOpenDriveEditorSubsystem::SetRoadMeshMaterialFolder(const FString& ContentPath)
+{
+	MeshGen.Settings.MaterialFolder = ContentPath;
+}
+
+void UOpenDriveEditorSubsystem::EnableRoadMeshCollision()
+{
+	MeshGen.EnableCollisionOnAll();
+}
+
+UStaticMesh* UOpenDriveEditorSubsystem::BakeRoadMeshToStaticMesh(const FString& AssetPath)
+{
+	ARoadMeshActor* Actor = MeshGen.GetLatestActor();
+	if (!Actor || !Actor->MeshComp)
+	{
+		UE_LOG(LogClass, Warning, TEXT("BakeRoadMeshToStaticMesh: no generated actor"));
+		return nullptr;
+	}
+	UDynamicMesh* DM = Actor->MeshComp->GetDynamicMesh();
+	if (!DM)
+	{
+		UE_LOG(LogClass, Warning, TEXT("BakeRoadMeshToStaticMesh: actor has no DynamicMesh"));
+		return nullptr;
+	}
+
+	const FString PackagePath = FPackageName::GetLongPackagePath(AssetPath);
+	const FString AssetName = FPackageName::GetLongPackageAssetName(AssetPath);
+	if (PackagePath.IsEmpty() || AssetName.IsEmpty())
+	{
+		UE_LOG(LogClass, Warning, TEXT("BakeRoadMeshToStaticMesh: invalid AssetPath '%s'"), *AssetPath);
+		return nullptr;
+	}
+
+	UPackage* Package = CreatePackage(*AssetPath);
+	if (!Package)
+	{
+		UE_LOG(LogClass, Warning, TEXT("BakeRoadMeshToStaticMesh: CreatePackage failed for '%s'"), *AssetPath);
+		return nullptr;
+	}
+	Package->FullyLoad();
+
+	UStaticMesh* SM = NewObject<UStaticMesh>(Package, *AssetName, RF_Public | RF_Standalone);
+	if (!SM)
+	{
+		UE_LOG(LogClass, Warning, TEXT("BakeRoadMeshToStaticMesh: NewObject<UStaticMesh> failed"));
+		return nullptr;
+	}
+
+	FGeometryScriptCopyMeshToAssetOptions Opt;
+	Opt.bEnableRecomputeNormals = true;
+	Opt.bEnableRecomputeTangents = true;
+	Opt.bReplaceMaterials = true;
+	Opt.NewMaterials = Actor->DefaultMaterials;
+	Opt.NewMaterialSlotNames.SetNum(Actor->DefaultMaterials.Num());
+	{
+		static const TCHAR* kSlotNames[] = { TEXT("Asphalt"), TEXT("Sidewalk"), TEXT("Border"), TEXT("Marking"), TEXT("Misc") };
+		for (int32 i = 0; i < Opt.NewMaterialSlotNames.Num(); ++i)
+		{
+			Opt.NewMaterialSlotNames[i] = (i < UE_ARRAY_COUNT(kSlotNames)) ? FName(kSlotNames[i]) : *FString::Printf(TEXT("Slot_%d"), i);
+		}
+	}
+	Opt.bApplyNaniteSettings = false;
+
+	FGeometryScriptMeshWriteLOD WriteLOD;
+	WriteLOD.LODIndex = 0;
+
+	EGeometryScriptOutcomePins Outcome = EGeometryScriptOutcomePins::Failure;
+	UGeometryScriptLibrary_StaticMeshFunctions::CopyMeshToStaticMesh(
+		DM, SM, Opt, WriteLOD, Outcome, nullptr);
+
+	if (Outcome != EGeometryScriptOutcomePins::Success)
+	{
+		UE_LOG(LogClass, Warning, TEXT("BakeRoadMeshToStaticMesh: CopyMeshToStaticMesh outcome=%d"), (int32)Outcome);
+		return nullptr;
+	}
+
+	SM->MarkPackageDirty();
+	FAssetRegistryModule::AssetCreated(SM);
+	UE_LOG(LogClass, Log, TEXT("BakeRoadMeshToStaticMesh: created '%s'"), *SM->GetPathName());
+	return SM;
 }
 
 // ==========================================

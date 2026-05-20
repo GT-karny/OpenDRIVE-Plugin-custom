@@ -43,6 +43,12 @@ public class OpenDRIVEEditor : ModuleRules
 				"OpenDRIVE",
 				"RoadManager",
 				"EditorSubsystem",
+				"GeometryCore",
+				"GeometryFramework",
+				"GeometryScriptingCore",
+				"GeometryScriptingEditor",
+				"MeshDescription",
+				"StaticMeshDescription",
 			}
 		);
 			
