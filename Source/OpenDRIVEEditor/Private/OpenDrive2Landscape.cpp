@@ -434,6 +434,95 @@ void UOpenDrive2Landscape::CreateRoadSplines(
 			}
 		}
 
+		// Pass 2.5: walk every junction's Connections and merge CPs that meet at junction
+		// boundaries. xodr files commonly express junction connectivity via the <junction>
+		// block rather than direct RoadLinks: a regular road's SUCC/PRED points at the junction
+		// itself, and the short connecting roads (the ones inside the junction) often have
+		// JUNCTION on both ends. Pass 2's ROAD-only check skips all of those, which is why
+		// the junction interior previously showed up as an un-carved hole in the landscape.
+		auto RoadEndpointAtJunction = [&](roadmanager::Road* R, int JunctionId) -> ULandscapeSplineControlPoint*
+		{
+			if (!R) return nullptr;
+			auto Touches = [&](roadmanager::LinkType T) {
+				roadmanager::RoadLink* L = R->GetLink(T);
+				return L
+					&& L->GetElementType() == roadmanager::RoadLink::ELEMENT_TYPE_JUNCTION
+					&& L->GetElementId() == JunctionId;
+			};
+			if (Touches(roadmanager::SUCCESSOR))   return RoadLastCP.FindRef(R->GetId());
+			if (Touches(roadmanager::PREDECESSOR)) return RoadFirstCP.FindRef(R->GetId());
+			return nullptr;
+		};
+
+		const int NumJunctions = Odr->GetNumOfJunctions();
+		for (int ji = 0; ji < NumJunctions; ++ji)
+		{
+			roadmanager::Junction* J = Odr->GetJunctionByIdx(ji);
+			if (!J) continue;
+			const int jid = J->GetId();
+
+			const int NumConn = J->GetNumberOfConnections();
+			for (int ci = 0; ci < NumConn; ++ci)
+			{
+				roadmanager::Connection* Conn = J->GetConnectionByIdx(ci);
+				if (!Conn) continue;
+				roadmanager::Road* Incoming   = Conn->GetIncomingRoad();
+				roadmanager::Road* Connecting = Conn->GetConnectingRoad();
+				if (!Incoming || !Connecting) continue;
+
+				// Which end of the incoming road sits at this junction?
+				ULandscapeSplineControlPoint* IncomingCP = RoadEndpointAtJunction(Incoming, jid);
+				if (!IncomingCP) continue;
+
+				// The Connection's contact point tells us which end of the connecting road
+				// touches the incoming road.
+				ULandscapeSplineControlPoint* ConnectingCP = nullptr;
+				switch (Conn->GetContactPoint())
+				{
+				case roadmanager::CONTACT_POINT_START: ConnectingCP = RoadFirstCP.FindRef(Connecting->GetId()); break;
+				case roadmanager::CONTACT_POINT_END:   ConnectingCP = RoadLastCP.FindRef(Connecting->GetId()); break;
+				default: break;
+				}
+				if (!ConnectingCP) continue;
+
+				MergeCPs(IncomingCP, ConnectingCP);
+			}
+		}
+
+		// Pass 2.6: spatial safety net for any endpoint CPs left unstitched. Covers xodr
+		// files where a connecting road's far end isn't reflected in any junction
+		// Connection (e.g., authored only from one side) or where direct RoadLinks point
+		// at unexpected element types. Strict tolerance — we only merge points that share
+		// a world position to within a few centimetres, which OpenDRIVE math guarantees
+		// for genuinely-connected endpoints.
+		{
+			const float EpsilonCm = 5.0f;
+			const float EpsilonSq = EpsilonCm * EpsilonCm;
+			TArray<ULandscapeSplineControlPoint*> Endpoints;
+			TSet<ULandscapeSplineControlPoint*> Seen;
+			auto Push = [&](ULandscapeSplineControlPoint* CP) {
+				if (CP && IsValid(CP) && !Seen.Contains(CP)) { Endpoints.Add(CP); Seen.Add(CP); }
+			};
+			for (auto& Pair : RoadFirstCP) Push(Pair.Value);
+			for (auto& Pair : RoadLastCP)  Push(Pair.Value);
+
+			for (int32 a = 0; a < Endpoints.Num(); ++a)
+			{
+				ULandscapeSplineControlPoint* A = Endpoints[a];
+				if (!A || !IsValid(A)) continue;
+				for (int32 b = a + 1; b < Endpoints.Num(); ++b)
+				{
+					ULandscapeSplineControlPoint* B = Endpoints[b];
+					if (!B || !IsValid(B) || B == A) continue;
+					if ((A->Location - B->Location).SizeSquared() < EpsilonSq)
+					{
+						MergeCPs(A, B);
+						Endpoints[b] = A; // survivor takes its place so later passes skip it
+					}
+				}
+			}
+		}
+
 		// Third pass: only true spline termini (CPs touching <= 1 segment) get an EndFalloff.
 		// Mid-CPs must keep EndFalloff=0 so adjacent segments blend seamlessly into one chain.
 		LSC->Modify();

@@ -314,9 +314,30 @@ UStaticMesh* UOpenDriveEditorSubsystem::BakeRoadMeshToStaticMesh(const FString& 
 		return nullptr;
 	}
 
+	// Generate lightmap UVs + rebuild so the baked mesh lights correctly when placed
+	// as a Static actor (the original DynamicMesh had none, which is why it rendered dark).
+	if (SM->GetNumSourceModels() > 0)
+	{
+		FStaticMeshSourceModel& SrcModel = SM->GetSourceModel(0);
+		SrcModel.BuildSettings.bGenerateLightmapUVs = true;
+		SrcModel.BuildSettings.SrcLightmapIndex = 0;
+		SrcModel.BuildSettings.DstLightmapIndex = 1;
+		SM->SetLightMapCoordinateIndex(1);
+		SM->Build(/*bSilent=*/true);
+	}
+
 	SM->MarkPackageDirty();
 	FAssetRegistryModule::AssetCreated(SM);
-	UE_LOG(LogClass, Log, TEXT("BakeRoadMeshToStaticMesh: created '%s'"), *SM->GetPathName());
+
+	// Persist the asset to disk so it survives editor restarts (the "save" half of the request).
+	const FString FileName = FPackageName::LongPackageNameToFilename(
+		AssetPath, FPackageName::GetAssetPackageExtension());
+	FSavePackageArgs SaveArgs;
+	SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
+	SaveArgs.SaveFlags = SAVE_NoError;
+	const bool bSaved = UPackage::SavePackage(Package, SM, *FileName, SaveArgs);
+	UE_LOG(LogClass, Log, TEXT("BakeRoadMeshToStaticMesh: created '%s' (saved=%d -> %s)"),
+		*SM->GetPathName(), bSaved ? 1 : 0, *FileName);
 	return SM;
 }
 

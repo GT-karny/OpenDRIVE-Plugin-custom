@@ -83,6 +83,16 @@ protected :
 	FReply Reset();
 
 	/**
+	* Generate the DynamicMesh road surface via UOpenDriveEditorSubsystem.
+	*/
+	FReply GenerateRoadMesh();
+
+	/**
+	* Clear all generated road mesh actors via UOpenDriveEditorSubsystem.
+	*/
+	FReply ClearRoadMesh();
+
+	/**
 	 * Gets if roads are loaded or not
 	 * @return True if loaded, False if not
 	 */

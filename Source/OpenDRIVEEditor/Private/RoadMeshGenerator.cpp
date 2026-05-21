@@ -31,6 +31,54 @@ namespace
 		return L;
 	}
 
+	/** True when this Road is a "connecting road" inside a junction (xodr <road junction="N"> with N >= 0). */
+	bool IsConnectingRoad(roadmanager::Road* R)
+	{
+		return R && R->GetJunction() >= 0;
+	}
+
+	/** True only for LANE_TYPE_DRIVING. Other paved types (bidirectional, ramps) and
+	 *  non-paved types (sidewalk, biking, shoulder, parking, border, etc.) keep their
+	 *  per-lane strip even on connecting roads — the junction fill only replaces the
+	 *  driving surface. */
+	bool IsDrivingLane(int32 LaneType)
+	{
+		return LaneType == (int32)roadmanager::Lane::LaneType::LANE_TYPE_DRIVING;
+	}
+
+	/** If Road R touches Junction(jid) via SUCC or PRED, fill OutS with the junction-facing
+	 *  s value (0 or road length) and OutSec with the lane section at that s. */
+	bool GetJunctionFacingSection(
+		roadmanager::Road* R, int jid,
+		double& OutS, roadmanager::LaneSection*& OutSec)
+	{
+		OutS = 0.0;
+		OutSec = nullptr;
+		if (!R) return false;
+
+		auto Touches = [&](roadmanager::LinkType T) {
+			roadmanager::RoadLink* L = R->GetLink(T);
+			return L
+				&& L->GetElementType() == roadmanager::RoadLink::ELEMENT_TYPE_JUNCTION
+				&& L->GetElementId() == jid;
+		};
+
+		const int n = R->GetNumberOfLaneSections();
+		if (n <= 0) return false;
+
+		if (Touches(roadmanager::SUCCESSOR))
+		{
+			OutS = R->GetLength();
+			OutSec = R->GetLaneSectionByIdx(n - 1);
+		}
+		else if (Touches(roadmanager::PREDECESSOR))
+		{
+			OutS = 0.0;
+			OutSec = R->GetLaneSectionByIdx(0);
+		}
+		return OutSec != nullptr;
+	}
+
 	/**
 	 * Scan a Content folder for UMaterialInterface assets and assign them to ERoadMeshMaterialSlot
 	 * by name keyword. Matching is case-insensitive on the asset name.
@@ -409,6 +457,204 @@ void FRoadMeshGenerator::AppendRoadMarksForLane(
 	}
 }
 
+bool FRoadMeshGenerator::BuildJunctionFillBuffers(
+	roadmanager::Junction* Junction,
+	FGeometryScriptSimpleMeshBuffers& OutBuffers,
+	int32& OutMaterialID) const
+{
+	if (!Junction) return false;
+	const int jid = Junction->GetId();
+
+	// Collect distinct incoming roads (for the centroid + arm bounds) and distinct
+	// connecting roads (whose outer edges shape the curved boundary).
+	TArray<roadmanager::Road*> Incoming;
+	TArray<roadmanager::Road*> Connecting;
+	{
+		TSet<roadmanager::Road*> SeenIn, SeenCon;
+		const int nConn = Junction->GetNumberOfConnections();
+		for (int ci = 0; ci < nConn; ++ci)
+		{
+			roadmanager::Connection* Conn = Junction->GetConnectionByIdx(ci);
+			if (!Conn) continue;
+			if (roadmanager::Road* IR = Conn->GetIncomingRoad())
+			{
+				if (!SeenIn.Contains(IR)) { SeenIn.Add(IR); Incoming.Add(IR); }
+			}
+			if (roadmanager::Road* CR = Conn->GetConnectingRoad())
+			{
+				if (!SeenCon.Contains(CR)) { SeenCon.Add(CR); Connecting.Add(CR); }
+			}
+		}
+	}
+	if (Incoming.Num() < 1) return false;
+
+	// Find the outermost Driving lane ids (left/right) at (R, s).
+	auto FindDrivingEdgeLanes = [&](roadmanager::LaneSection* Sec, int& OutLeft, int& OutRight)
+	{
+		OutLeft = 0; OutRight = 0;
+		if (!Sec) return;
+		const int nLanes = Sec->GetNumberOfLanes();
+		for (int li = 0; li < nLanes; ++li)
+		{
+			roadmanager::Lane* L = Sec->GetLaneByIdx(li);
+			if (!L) continue;
+			const int lid = L->GetId();
+			if (lid == 0) continue;
+			if (!IsDrivingLane((int32)L->GetLaneType())) continue;
+			if (lid > OutLeft)  OutLeft = lid;
+			if (lid < OutRight) OutRight = lid;
+		}
+	};
+
+	// Both outermost driving-lane edge points at (R, s). Skips non-finite results.
+	auto BothEdges = [&](roadmanager::Road* R, double s, roadmanager::LaneSection* Sec,
+	                     bool& bHasL, FVector& L, bool& bHasR, FVector& Rt)
+	{
+		bHasL = bHasR = false;
+		if (!R || !Sec) return;
+		int leftmost, rightmost;
+		FindDrivingEdgeLanes(Sec, leftmost, rightmost);
+		if (leftmost > 0)
+		{
+			const FVector P = EvalLanePoint(R, s, +Sec->GetOuterOffset(s, leftmost), Settings.ZOffsetCm);
+			if (!P.ContainsNaN()) { L = P; bHasL = true; }
+		}
+		if (rightmost < 0)
+		{
+			const FVector P = EvalLanePoint(R, s, -Sec->GetOuterOffset(s, rightmost), Settings.ZOffsetCm);
+			if (!P.ContainsNaN()) { Rt = P; bHasR = true; }
+		}
+	};
+
+	// Incoming gates: both driving edges at each arm. Anchor the arms + stable centroid.
+	TArray<FVector> Gates;
+	for (roadmanager::Road* R : Incoming)
+	{
+		double s = 0.0;
+		roadmanager::LaneSection* Sec = nullptr;
+		if (!GetJunctionFacingSection(R, jid, s, Sec)) continue;
+		bool bL, bR; FVector L, Rt;
+		BothEdges(R, s, Sec, bL, L, bR, Rt);
+		if (bL) Gates.Add(L);
+		if (bR) Gates.Add(Rt);
+	}
+	if (Gates.Num() < 2) return false;
+
+	FVector Centroid = FVector::ZeroVector;
+	for (const FVector& P : Gates) Centroid += P;
+	Centroid /= (double)Gates.Num();
+
+	auto Radius2D = [&](const FVector& P) {
+		const double dx = P.X - Centroid.X, dy = P.Y - Centroid.Y;
+		return FMath::Sqrt(dx * dx + dy * dy);
+	};
+
+	// Candidates = incoming gates + connecting-road OUTER edges. For each connecting
+	// road sample we keep only the edge point FARTHER from the centroid: a connecting
+	// road sweeps through the junction interior, so its inner edge (and mid-span points
+	// near the centre) are interior — feeding them to the envelope produced the
+	// inward "sea-urchin" spikes. The outer edge alone traces the rounded corner.
+	TArray<FVector> Candidates = Gates;
+	for (roadmanager::Road* CR : Connecting)
+	{
+		const double len = CR->GetLength();
+		if (len <= KINDA_SMALL_NUMBER) continue;
+		const double step = FMath::Clamp(len / 8.0, 0.5, 2.0);
+		for (double s = 0.0; s <= len + 1e-3; s += step)
+		{
+			const double ss = FMath::Min(s, len);
+			roadmanager::LaneSection* Sec = CR->GetLaneSectionByS(ss);
+			bool bL, bR; FVector L, Rt;
+			BothEdges(CR, ss, Sec, bL, L, bR, Rt);
+			if (bL && bR)      Candidates.Add(Radius2D(L) >= Radius2D(Rt) ? L : Rt);
+			else if (bL)       Candidates.Add(L);
+			else if (bR)       Candidates.Add(Rt);
+		}
+	}
+
+	// Radial-max envelope: bin candidates by angle around the centroid and keep the
+	// farthest point per bin. Star-shaped by construction → always safe to fan.
+	const int NumBins = 120;
+	TArray<FVector> BinPt; BinPt.SetNum(NumBins);
+	TArray<float>   BinR;  BinR.Init(-1.f, NumBins);
+	for (const FVector& P : Candidates)
+	{
+		if (P.ContainsNaN()) continue;
+		const float r = (float)Radius2D(P);
+		const double ang = FMath::Atan2(P.Y - Centroid.Y, P.X - Centroid.X); // [-PI, PI]
+		int bin = (int)FMath::FloorToDouble((ang + PI) / (2.0 * PI) * NumBins);
+		bin = FMath::Clamp(bin, 0, NumBins - 1);
+		if (r > BinR[bin]) { BinR[bin] = r; BinPt[bin] = P; }
+	}
+
+	// Non-empty bins, already in angular order.
+	TArray<FVector> Boundary;
+	Boundary.Reserve(NumBins);
+	for (int b = 0; b < NumBins; ++b)
+	{
+		if (BinR[b] >= 0.f && !BinPt[b].ContainsNaN()) Boundary.Add(BinPt[b]);
+	}
+	if (Boundary.Num() < 3) return false;
+	if (Centroid.ContainsNaN()) return false;
+
+	const int N = Boundary.Num();
+
+	// Decide winding from the polygon's signed area in XY so the fan always faces up
+	// (otherwise a back-facing fill gets culled and the landscape shows through — which
+	// looked like an un-materialed "tan" patch).
+	double SignedArea2 = 0.0;
+	for (int i = 0; i < N; ++i)
+	{
+		const FVector& P0 = Boundary[i];
+		const FVector& P1 = Boundary[(i + 1) % N];
+		SignedArea2 += (P0.X - Centroid.X) * (P1.Y - Centroid.Y)
+		             - (P1.X - Centroid.X) * (P0.Y - Centroid.Y);
+	}
+	// UE is left-handed: a CW loop (negative signed area) fans into upward normals.
+	const bool bReverse = (SignedArea2 > 0.0);
+
+	OutBuffers.Vertices.Reserve(N + 1);
+	OutBuffers.UV0.Reserve(N + 1);
+	OutBuffers.Triangles.Reserve(N);
+	OutBuffers.TriGroupIDs.Reserve(N);
+
+	OutBuffers.Vertices.Add(Centroid);
+	OutBuffers.UV0.Add(FVector2D(0.5f, 0.5f));
+	for (int i = 0; i < N; ++i)
+	{
+		OutBuffers.Vertices.Add(Boundary[i]);
+		const double ang = FMath::Atan2(Boundary[i].Y - Centroid.Y, Boundary[i].X - Centroid.X);
+		OutBuffers.UV0.Add(FVector2D(
+			(float)(0.5 + 0.5 * FMath::Cos(ang)),
+			(float)(0.5 + 0.5 * FMath::Sin(ang))));
+	}
+
+	const int32 Mat = (int32)ERoadMeshMaterialSlot::Asphalt;
+	for (int i = 0; i < N; ++i)
+	{
+		const int32 A = 0;
+		const int32 B = 1 + i;
+		const int32 C = 1 + ((i + 1) % N);
+
+		// Skip degenerate (near-zero-area) triangles. Slivers have unstable face
+		// normals, and RecomputeNormals averages those into the shared overlay,
+		// which is what made the patch shade as if in shadow.
+		const FVector& VA = OutBuffers.Vertices[A];
+		const FVector& VB = OutBuffers.Vertices[B];
+		const FVector& VC = OutBuffers.Vertices[C];
+		const double Area2 = FVector::CrossProduct(VB - VA, VC - VA).Size();
+		if (Area2 < 1.0) continue; // < ~0.5 cm^2 projected area
+
+		OutBuffers.Triangles.Add(bReverse ? FIntVector(A, C, B) : FIntVector(A, B, C));
+		OutBuffers.TriGroupIDs.Add(Mat);
+	}
+
+	if (OutBuffers.Triangles.Num() < 1) return false;
+
+	OutMaterialID = Mat;
+	return true;
+}
+
 void FRoadMeshGenerator::GenerateRoadMesh(UWorld* World)
 {
 	LastReport.Empty();
@@ -506,11 +752,23 @@ void FRoadMeshGenerator::GenerateRoadMesh(UWorld* World)
 			const TArray<double> SList = BuildSList(Road, Sec, SectionStartS);
 			if (SList.Num() < 2) continue;
 
+			const bool bConnecting = IsConnectingRoad(Road);
+
 			for (int32 li = 0; li < Sec->GetNumberOfLanes(); ++li)
 			{
 				roadmanager::Lane* L = Sec->GetLaneByIdx(li);
 				if (!L) continue;
 				const int32 Lid = L->GetId();
+
+				// Skip Driving lanes on connecting roads — the junction fill below
+				// replaces them with one continuous patch. Other lane types (sidewalk,
+				// biking, shoulder, ...) on connecting roads are still emitted so they
+				// sit beside the fill.
+				if (bConnecting && Settings.bGenerateJunctionPatches
+					&& IsDrivingLane((int32)L->GetLaneType()))
+				{
+					continue;
+				}
 
 				// Surface strip: skip the reference line (zero width).
 				if (Lid != 0)
@@ -548,6 +806,40 @@ void FRoadMeshGenerator::GenerateRoadMesh(UWorld* World)
 		}
 	}
 
+	// Junction fills: one continuous asphalt patch per junction, bounded by the
+	// outermost Driving edges of every incoming road at the junction interface.
+	// Driving lanes of the connecting roads inside the junction were skipped above,
+	// so this patch replaces them rather than overlapping.
+	int32 JunctionFillsEmitted = 0;
+	int32 JunctionFillTris = 0;
+	if (Settings.bGenerateJunctionPatches)
+	{
+		const int NumJunctions = Odr->GetNumOfJunctions();
+		for (int ji = 0; ji < NumJunctions; ++ji)
+		{
+			roadmanager::Junction* J = Odr->GetJunctionByIdx(ji);
+			if (!J) continue;
+
+			FGeometryScriptSimpleMeshBuffers Buf;
+			int32 Mat = 0;
+			if (BuildJunctionFillBuffers(J, Buf, Mat))
+			{
+				const int32 TriBefore = Buf.Triangles.Num();
+				const int32 VertBefore = Buf.Vertices.Num();
+
+				FGeometryScriptIndexList NewTris;
+				UGeometryScriptLibrary_MeshBasicEditFunctions::AppendBuffersToMesh(
+					Mesh, Buf, NewTris, Mat, /*bDeferChangeNotifications=*/true, nullptr);
+
+				TotalTri += TriBefore;
+				TotalVert += VertBefore;
+				JunctionFillTris += TriBefore;
+				JunctionFillsEmitted++;
+				UsedMaterialIDs.Add(Mat);
+			}
+		}
+	}
+
 	// Normals
 	FGeometryScriptCalculateNormalsOptions NormOpt;
 	UGeometryScriptLibrary_MeshNormalsFunctions::RecomputeNormals(Mesh, NormOpt, /*bDefer=*/false, nullptr);
@@ -563,8 +855,9 @@ void FRoadMeshGenerator::GenerateRoadMesh(UWorld* World)
 	}
 
 	LastReport = FString::Printf(
-		TEXT("Roads=%d Lanes=%d Vertices=%d Triangles=%d MarkTris=%d Materials=[%s]"),
-		RoadsProcessed, LanesEmitted, TotalVert, TotalTri, TotalMarkTri, *MatList);
+		TEXT("Roads=%d Lanes=%d Vertices=%d Triangles=%d MarkTris=%d JunctionFills=%d (%d tris) Materials=[%s]"),
+		RoadsProcessed, LanesEmitted, TotalVert, TotalTri, TotalMarkTri,
+		JunctionFillsEmitted, JunctionFillTris, *MatList);
 	UE_LOG(LogOpenDriveRoadMesh, Log, TEXT("GenerateRoadMesh: %s"), *LastReport);
 }
 

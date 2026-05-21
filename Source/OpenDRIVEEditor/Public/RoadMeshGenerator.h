@@ -14,6 +14,7 @@ namespace roadmanager
 	class LaneSection;
 	class Lane;
 	class OpenDrive;
+	class Junction;
 }
 
 /**
@@ -63,6 +64,15 @@ private:
 		double SectionStartS,
 		double SectionLength,
 		int32& OutMarkTriCount) const;
+
+	/** Build a fan-triangulated asphalt patch that covers a junction's interior.
+	 *  Boundary = outermost Driving-lane edges of each incoming road at its
+	 *  junction-facing s. Returns false if the junction is degenerate
+	 *  (no incoming roads, no driving lanes, or only one gate). */
+	bool BuildJunctionFillBuffers(
+		roadmanager::Junction* Junction,
+		struct FGeometryScriptSimpleMeshBuffers& OutBuffers,
+		int32& OutMaterialID) const;
 
 	/** Spawned actors that we own. */
 	TArray<TWeakObjectPtr<ARoadMeshActor>> GeneratedActors;

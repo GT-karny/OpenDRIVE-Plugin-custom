@@ -6,6 +6,10 @@
 #include "SignalAssemblyMapping.h"
 #include "LandscapeLayerInfoObject.h"
 #include "Widgets/Input/SEditableTextBox.h"
+#include "OpenDriveEditorSubsystem.h"
+#include "Editor.h"
+#include "Framework/Notifications/NotificationManager.h"
+#include "Widgets/Notifications/SNotificationList.h"
 
 void SOpenDRIVEEditorModeWidget::Construct(const FArguments& InArgs)
 {
@@ -244,9 +248,39 @@ TSharedRef<SWidget> SOpenDRIVEEditorModeWidget::ConstructRoadTabContent(const FA
 		[
 			_stepTextPtr.ToSharedRef()
 		]
-		+ SVerticalBox::Slot().AutoHeight().Padding(5.f, 5.f, 5.f, 10.f)
+		+ SVerticalBox::Slot().AutoHeight().Padding(5.f, 5.f, 5.f, 0.f)
 		[
 			StepSlider
+		]
+		// --- Road Mesh (DynamicMesh surface) ---
+		+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 10.f, 0.f, 0.f).HAlign(HAlign_Center) [ SNew(SSeparator) ]
+		+ SVerticalBox::Slot().AutoHeight().Padding(5.f, 5.f, 5.f, 0.f)
+		[
+			SNew(STextBlock).Text(FText::FromString("Road Surface Mesh")).Font(*_fontInfoPtr)
+				.ToolTipText(FText::FromString(TEXT(
+					"Generates a DynamicMesh road surface (asphalt / sidewalk / markings, plus a "
+					"filled patch per junction) from the loaded OpenDRIVE. Separate from the lane "
+					"preview above.")))
+		]
+		+ SVerticalBox::Slot().AutoHeight().Padding(5.f, 2.f, 5.f, 10.f)
+		[
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().FillWidth(0.5f).Padding(0, 0, 5, 0)
+			[
+				SNew(SButton).Text(FText::FromString("Gen Road Mesh"))
+					.OnClicked(this, &SOpenDRIVEEditorModeWidget::GenerateRoadMesh)
+					.IsEnabled(this, &SOpenDRIVEEditorModeWidget::CheckIfInEditorMode)
+					.HAlign(HAlign_Center)
+					.ToolTipText(FText::FromString(TEXT("Build the road surface mesh from the loaded OpenDRIVE.")))
+			]
+			+ SHorizontalBox::Slot().FillWidth(0.5f).Padding(5, 0, 0, 0)
+			[
+				SNew(SButton).Text(FText::FromString("Clear Road Mesh"))
+					.OnClicked(this, &SOpenDRIVEEditorModeWidget::ClearRoadMesh)
+					.IsEnabled(this, &SOpenDRIVEEditorModeWidget::CheckIfInEditorMode)
+					.HAlign(HAlign_Center)
+					.ToolTipText(FText::FromString(TEXT("Destroy all generated road mesh actors.")))
+			]
 		];
 }
 
@@ -611,6 +645,57 @@ FReply SOpenDRIVEEditorModeWidget::Reset()
 {
 	GetEdMode()->ResetRoadsArray();
 	_showArrowsCheckBox.Get()->SetIsChecked(ECheckBoxState::Unchecked);
+	return FReply::Handled();
+}
+
+FReply SOpenDRIVEEditorModeWidget::GenerateRoadMesh()
+{
+	auto Notify = [](const FString& Msg, bool bSuccess) {
+		FNotificationInfo Info(FText::FromString(Msg));
+		Info.ExpireDuration = 4.f;
+		Info.bUseSuccessFailIcons = true;
+		if (TSharedPtr<SNotificationItem> Item = FSlateNotificationManager::Get().AddNotification(Info))
+		{
+			Item->SetCompletionState(bSuccess ? SNotificationItem::CS_Success : SNotificationItem::CS_Fail);
+		}
+	};
+
+	UOpenDriveEditorSubsystem* SS = GEditor ? GEditor->GetEditorSubsystem<UOpenDriveEditorSubsystem>() : nullptr;
+	if (!SS)
+	{
+		Notify(TEXT("OpenDriveEditorSubsystem unavailable."), false);
+		return FReply::Handled();
+	}
+
+	// GenerateRoadMesh returns a 1-line report; surface it so the user sees tri/junction counts.
+	const FString Report = SS->GenerateRoadMesh();
+	if (Report.IsEmpty())
+	{
+		Notify(TEXT("Road mesh generation produced no output (is an OpenDRIVE loaded?)."), false);
+		return FReply::Handled();
+	}
+
+	// Also bake to a saved StaticMesh asset so there's a persistent, properly-lightable
+	// result (the live DynamicMesh is preview-only). Fixed default path; overwrites on regen.
+	const FString AssetPath = TEXT("/Game/OpenDRIVE_Generated/SM_OpenDriveRoad");
+	UStaticMesh* SM = SS->BakeRoadMeshToStaticMesh(AssetPath);
+	if (SM)
+	{
+		Notify(FString::Printf(TEXT("%s\nBaked & saved: %s"), *Report, *AssetPath), true);
+	}
+	else
+	{
+		Notify(FString::Printf(TEXT("%s\n(StaticMesh bake/save failed — see log)"), *Report), true);
+	}
+	return FReply::Handled();
+}
+
+FReply SOpenDRIVEEditorModeWidget::ClearRoadMesh()
+{
+	if (UOpenDriveEditorSubsystem* SS = GEditor ? GEditor->GetEditorSubsystem<UOpenDriveEditorSubsystem>() : nullptr)
+	{
+		SS->ClearGeneratedRoadMeshes();
+	}
 	return FReply::Handled();
 }
 
