@@ -11,3 +11,6 @@ Packaged
 
 # Local-only OpenDRIVE specification files (not tracked in git)
 ThirdParty/OpenDRIVE/
+
+# Python verification scratch (junction-fill prototyping)
+_pyverify/

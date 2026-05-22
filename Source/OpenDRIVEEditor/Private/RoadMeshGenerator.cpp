@@ -46,6 +46,81 @@ namespace
 		return LaneType == (int32)roadmanager::Lane::LaneType::LANE_TYPE_DRIVING;
 	}
 
+	/** Flip each triangle's winding so its UE front face points up. Roads and markings are
+	 *  walked-on surfaces, so the top face should always be the front face; this stops
+	 *  one-sided materials from being culled (or rendered inside-out) from above. It replaces
+	 *  the old per-lane-sign hardcoded winding, which got the centerline (lane 0) and one
+	 *  road side backwards. Vertex normals are forced up separately, so geometry facing and
+	 *  shading normals stay consistent.
+	 *
+	 *  Sign note: UE is left-handed and its front-face normal is the NEGATIVE of the
+	 *  textbook cross product (v1-v0)x(v2-v0). So the front face points up exactly when that
+	 *  cross product's Z is NEGATIVE; we flip when it is positive. (Verified against the
+	 *  original working lane winding, whose cross-Z is negative.) */
+	void OrientTrianglesUp(FGeometryScriptSimpleMeshBuffers& Buf)
+	{
+		for (FIntVector& T : Buf.Triangles)
+		{
+			const FVector& v0 = Buf.Vertices[T.X];
+			const FVector& v1 = Buf.Vertices[T.Y];
+			const FVector& v2 = Buf.Vertices[T.Z];
+			if (FVector::CrossProduct(v1 - v0, v2 - v0).Z > 0.0)
+			{
+				Swap(T.Y, T.Z);
+			}
+		}
+	}
+
+	/** Ear-clip a simple polygon (XY) given in order. Index triples into Poly. Handles concave
+	 *  polygons without a centroid hub, so it triangulates the junction outline directly. */
+	void EarClipPolygon(const TArray<FVector>& Poly, TArray<FIntVector>& OutTris)
+	{
+		const int n = Poly.Num();
+		if (n < 3) return;
+		auto Cross = [](const FVector& a, const FVector& b, const FVector& c)
+		{ return (b.X - a.X) * (c.Y - a.Y) - (b.Y - a.Y) * (c.X - a.X); };
+
+		double area2 = 0.0;
+		for (int i = 0; i < n; ++i) { const FVector& a = Poly[i]; const FVector& b = Poly[(i + 1) % n]; area2 += a.X * b.Y - b.X * a.Y; }
+		TArray<int> V; V.SetNum(n);
+		for (int i = 0; i < n; ++i) V[i] = (area2 >= 0.0) ? i : (n - 1 - i);
+
+		auto InTri = [&](const FVector& p, const FVector& a, const FVector& b, const FVector& c)
+		{
+			const double d1 = Cross(p, a, b), d2 = Cross(p, b, c), d3 = Cross(p, c, a);
+			const bool neg = (d1 < 0) || (d2 < 0) || (d3 < 0);
+			const bool pos = (d1 > 0) || (d2 > 0) || (d3 > 0);
+			return !(neg && pos);
+		};
+
+		int guard = 0;
+		while (V.Num() > 3 && guard++ < 100000)
+		{
+			const int m = V.Num();
+			bool clipped = false;
+			for (int k = 0; k < m; ++k)
+			{
+				const int i0 = V[(k + m - 1) % m], i1 = V[k], i2 = V[(k + 1) % m];
+				const FVector& a = Poly[i0]; const FVector& b = Poly[i1]; const FVector& c = Poly[i2];
+				if (Cross(a, b, c) <= 0.0) continue;
+				bool ear = true;
+				for (int j = 0; j < m; ++j)
+				{
+					const int vj = V[j];
+					if (vj == i0 || vj == i1 || vj == i2) continue;
+					if (InTri(Poly[vj], a, b, c)) { ear = false; break; }
+				}
+				if (!ear) continue;
+				OutTris.Add(FIntVector(i0, i1, i2));
+				V.RemoveAt(k);
+				clipped = true;
+				break;
+			}
+			if (!clipped) break;
+		}
+		if (V.Num() == 3) OutTris.Add(FIntVector(V[0], V[1], V[2]));
+	}
+
 	/** If Road R touches Junction(jid) via SUCC or PRED, fill OutS with the junction-facing
 	 *  s value (0 or road length) and OutSec with the lane section at that s. */
 	bool GetJunctionFacingSection(
@@ -77,6 +152,29 @@ namespace
 			OutSec = R->GetLaneSectionByIdx(0);
 		}
 		return OutSec != nullptr;
+	}
+
+	/** The road linked at the connecting road's far end (the end NOT joined to Incoming).
+	 *  Implemented with plain RoadLink lookups because the newer
+	 *  Junction::GetRoadAtOtherEndOfConnectingRoad is declared in the header but is NOT
+	 *  exported by the prebuilt RoadManager.lib this plugin links against. */
+	roadmanager::Road* RoadAtOtherEnd(roadmanager::Road* Connecting, roadmanager::Road* Incoming)
+	{
+		if (!Connecting || !Incoming) return nullptr;
+		roadmanager::OpenDrive* Odr = roadmanager::Position::GetOpenDrive();
+		if (!Odr) return nullptr;
+		const int InId = Incoming->GetId();
+		const roadmanager::LinkType Ends[2] = { roadmanager::PREDECESSOR, roadmanager::SUCCESSOR };
+		for (roadmanager::LinkType T : Ends)
+		{
+			roadmanager::RoadLink* Lnk = Connecting->GetLink(T);
+			if (!Lnk) continue;
+			if (Lnk->GetElementType() != roadmanager::RoadLink::ELEMENT_TYPE_ROAD) continue;
+			const int Eid = Lnk->GetElementId();
+			if (Eid == InId) continue; // this end is the incoming road
+			if (roadmanager::Road* R = Odr->GetRoadById(Eid)) return R;
+		}
+		return nullptr;
 	}
 
 	/**
@@ -269,9 +367,29 @@ bool FRoadMeshGenerator::BuildLaneStripBuffers(
 
 	if (!bHasAnyWidth) return false;
 
-	// Triangle winding: UE (left-handed) renders the FRONT face when vertices wind clockwise
-	// when viewed from the front. After the CoordTranslate Y-flip, the lane geometry inherits
-	// the OpenDRIVE-side handedness — so we use the opposite winding from my first attempt.
+	// Per-vertex normals from the local surface frame (along-s x across-t), forced upward.
+	// We write them into the buffer instead of relying on a post-build RecomputeNormals:
+	// AppendBuffersToMesh on a normal-less buffer left the normal overlay unset, so the
+	// DynamicMeshComponent fell back to tangent-derived normals — which is why the surface
+	// shaded flat/grey ("hazy") and the World-Normal debug view showed the road-direction
+	// (tangent) colour instead of up-blue.
+	OutBuffers.Normals.SetNum(N * 2);
+	for (int32 i = 0; i < N; ++i)
+	{
+		int32 a = i, b = i + 1;
+		if (b >= N) { a = i - 1; b = i; }                 // last row: backward difference
+		const FVector AlongS  = OutBuffers.Vertices[2 * b] - OutBuffers.Vertices[2 * a];
+		const FVector AcrossT = OutBuffers.Vertices[2 * i + 1] - OutBuffers.Vertices[2 * i];
+		FVector Nrm = FVector::CrossProduct(AlongS, AcrossT);
+		if (!Nrm.Normalize()) Nrm = FVector::UpVector;
+		if (Nrm.Z < 0.f) Nrm = -Nrm;                      // road surface normals point up
+		OutBuffers.Normals[2 * i]     = Nrm;
+		OutBuffers.Normals[2 * i + 1] = Nrm;
+	}
+
+	// Emit two triangles per quad with a provisional winding; OrientTrianglesUp() below
+	// flips any that end up facing down, so the visible face is always the top regardless
+	// of lane side or the CoordTranslate Y-flip.
 	for (int32 i = 0; i + 1 < N; ++i)
 	{
 		const int32 A = 2 * i;       // inner at s_i
@@ -279,19 +397,13 @@ bool FRoadMeshGenerator::BuildLaneStripBuffers(
 		const int32 C = 2 * (i + 1); // inner at s_{i+1}
 		const int32 D = 2 * (i + 1) + 1; // outer at s_{i+1}
 
-		if (LaneId > 0)
-		{
-			OutBuffers.Triangles.Add(FIntVector(A, C, B));
-			OutBuffers.Triangles.Add(FIntVector(B, C, D));
-		}
-		else
-		{
-			OutBuffers.Triangles.Add(FIntVector(A, B, C));
-			OutBuffers.Triangles.Add(FIntVector(B, D, C));
-		}
+		OutBuffers.Triangles.Add(FIntVector(A, C, B));
+		OutBuffers.Triangles.Add(FIntVector(B, C, D));
 		OutBuffers.TriGroupIDs.Add(LaneId);
 		OutBuffers.TriGroupIDs.Add(LaneId);
 	}
+
+	OrientTrianglesUp(OutBuffers);
 
 	OutMaterialID = FRoadMeshSettings::SlotForLaneType((int32)Lane->GetLaneType());
 	return true;
@@ -368,25 +480,36 @@ void FRoadMeshGenerator::AppendRoadMarksForLane(
 			B.UV0.Add(FVector2D(U, 1.0f));
 		}
 
+		// Per-vertex up-facing normals (see BuildLaneStripBuffers for the rationale).
+		B.Normals.SetNum(N * 2);
+		for (int32 i = 0; i < N; ++i)
+		{
+			int32 a = i, b = i + 1;
+			if (b >= N) { a = i - 1; b = i; }
+			const FVector AlongS  = B.Vertices[2 * b] - B.Vertices[2 * a];
+			const FVector AcrossT = B.Vertices[2 * i + 1] - B.Vertices[2 * i];
+			FVector Nrm = FVector::CrossProduct(AlongS, AcrossT);
+			if (!Nrm.Normalize()) Nrm = FVector::UpVector;
+			if (Nrm.Z < 0.f) Nrm = -Nrm;
+			B.Normals[2 * i]     = Nrm;
+			B.Normals[2 * i + 1] = Nrm;
+		}
+
 		for (int32 i = 0; i + 1 < N; ++i)
 		{
 			const int32 A = 2 * i;
 			const int32 Bv = 2 * i + 1;
 			const int32 C = 2 * (i + 1);
 			const int32 D = 2 * (i + 1) + 1;
-			if (LaneId > 0)
-			{
-				B.Triangles.Add(FIntVector(A, C, Bv));
-				B.Triangles.Add(FIntVector(Bv, C, D));
-			}
-			else
-			{
-				B.Triangles.Add(FIntVector(A, Bv, C));
-				B.Triangles.Add(FIntVector(Bv, D, C));
-			}
+			B.Triangles.Add(FIntVector(A, C, Bv));
+			B.Triangles.Add(FIntVector(Bv, C, D));
 			B.TriGroupIDs.Add(LaneId);
 			B.TriGroupIDs.Add(LaneId);
 		}
+
+		// Same up-orientation fix as the lane strips: the old per-sign winding rendered the
+		// centerline (lane 0) and one side's marks inside-out.
+		OrientTrianglesUp(B);
 
 		FGeometryScriptIndexList NewTris;
 		UGeometryScriptLibrary_MeshBasicEditFunctions::AppendBuffersToMesh(
@@ -465,33 +588,34 @@ bool FRoadMeshGenerator::BuildJunctionFillBuffers(
 	if (!Junction) return false;
 	const int jid = Junction->GetId();
 
-	// Collect distinct incoming roads (for the centroid + arm bounds) and distinct
-	// connecting roads (whose outer edges shape the curved boundary).
+	// Incoming roads anchor the junction mouths. Each connecting road joins two of them (an
+	// incoming arm and an outgoing arm); we keep that (In, Connecting, Out) topology so we
+	// can pick, per corner, the connecting road that actually forms that corner instead of
+	// guessing the outermost edge from a sampled envelope.
+	struct FJConn { roadmanager::Road* In; roadmanager::Road* Con; roadmanager::Road* Out; };
 	TArray<roadmanager::Road*> Incoming;
-	TArray<roadmanager::Road*> Connecting;
+	TArray<FJConn> Conns;
 	{
-		TSet<roadmanager::Road*> SeenIn, SeenCon;
+		TSet<roadmanager::Road*> SeenIn;
 		const int nConn = Junction->GetNumberOfConnections();
 		for (int ci = 0; ci < nConn; ++ci)
 		{
 			roadmanager::Connection* Conn = Junction->GetConnectionByIdx(ci);
 			if (!Conn) continue;
-			if (roadmanager::Road* IR = Conn->GetIncomingRoad())
-			{
-				if (!SeenIn.Contains(IR)) { SeenIn.Add(IR); Incoming.Add(IR); }
-			}
-			if (roadmanager::Road* CR = Conn->GetConnectingRoad())
-			{
-				if (!SeenCon.Contains(CR)) { SeenCon.Add(CR); Connecting.Add(CR); }
-			}
+			roadmanager::Road* IR = Conn->GetIncomingRoad();
+			roadmanager::Road* CR = Conn->GetConnectingRoad();
+			if (!IR || !CR) continue;
+			if (!SeenIn.Contains(IR)) { SeenIn.Add(IR); Incoming.Add(IR); }
+			roadmanager::Road* OR = RoadAtOtherEnd(CR, IR);
+			Conns.Add({ IR, CR, OR });
 		}
 	}
-	if (Incoming.Num() < 1) return false;
+	if (Incoming.Num() < 2) return false;
 
-	// Find the outermost Driving lane ids (left/right) at (R, s).
-	auto FindDrivingEdgeLanes = [&](roadmanager::LaneSection* Sec, int& OutLeft, int& OutRight)
+	// Drivable t-range [Lo,Hi] across all driving lanes of a section at s.
+	auto DrivingTRange = [&](roadmanager::LaneSection* Sec, double s, bool& bOK, double& Lo, double& Hi)
 	{
-		OutLeft = 0; OutRight = 0;
+		bOK = false; Lo = 0.0; Hi = 0.0;
 		if (!Sec) return;
 		const int nLanes = Sec->GetNumberOfLanes();
 		for (int li = 0; li < nLanes; ++li)
@@ -499,155 +623,128 @@ bool FRoadMeshGenerator::BuildJunctionFillBuffers(
 			roadmanager::Lane* L = Sec->GetLaneByIdx(li);
 			if (!L) continue;
 			const int lid = L->GetId();
-			if (lid == 0) continue;
-			if (!IsDrivingLane((int32)L->GetLaneType())) continue;
-			if (lid > OutLeft)  OutLeft = lid;
-			if (lid < OutRight) OutRight = lid;
+			if (lid == 0 || !IsDrivingLane((int32)L->GetLaneType())) continue;
+			const int sgn = (lid > 0) ? 1 : -1;
+			const double outer = sgn * Sec->GetOuterOffset(s, lid);
+			const double inner = sgn * Sec->GetOuterOffset(s, lid - sgn);
+			const double a = FMath::Min(outer, inner), b = FMath::Max(outer, inner);
+			if (!bOK) { Lo = a; Hi = b; bOK = true; }
+			else { Lo = FMath::Min(Lo, a); Hi = FMath::Max(Hi, b); }
 		}
 	};
 
-	// Both outermost driving-lane edge points at (R, s). Skips non-finite results.
-	auto BothEdges = [&](roadmanager::Road* R, double s, roadmanager::LaneSection* Sec,
-	                     bool& bHasL, FVector& L, bool& bHasR, FVector& Rt)
+	// Per-arm gate (full driving span at the junction-facing s) + centroid + angle.
+	struct FArm { roadmanager::Road* Road; FVector Mid; double Ang; };
+	TArray<FArm> Arms;
+	TArray<FVector> GatePts;
+	for (roadmanager::Road* A : Incoming)
 	{
-		bHasL = bHasR = false;
-		if (!R || !Sec) return;
-		int leftmost, rightmost;
-		FindDrivingEdgeLanes(Sec, leftmost, rightmost);
-		if (leftmost > 0)
-		{
-			const FVector P = EvalLanePoint(R, s, +Sec->GetOuterOffset(s, leftmost), Settings.ZOffsetCm);
-			if (!P.ContainsNaN()) { L = P; bHasL = true; }
-		}
-		if (rightmost < 0)
-		{
-			const FVector P = EvalLanePoint(R, s, -Sec->GetOuterOffset(s, rightmost), Settings.ZOffsetCm);
-			if (!P.ContainsNaN()) { Rt = P; bHasR = true; }
-		}
-	};
-
-	// Incoming gates: both driving edges at each arm. Anchor the arms + stable centroid.
-	TArray<FVector> Gates;
-	for (roadmanager::Road* R : Incoming)
-	{
-		double s = 0.0;
-		roadmanager::LaneSection* Sec = nullptr;
-		if (!GetJunctionFacingSection(R, jid, s, Sec)) continue;
-		bool bL, bR; FVector L, Rt;
-		BothEdges(R, s, Sec, bL, L, bR, Rt);
-		if (bL) Gates.Add(L);
-		if (bR) Gates.Add(Rt);
+		double s = 0.0; roadmanager::LaneSection* Sec = nullptr;
+		if (!GetJunctionFacingSection(A, jid, s, Sec)) continue;
+		bool ok; double Lo, Hi; DrivingTRange(Sec, s, ok, Lo, Hi);
+		if (!ok) continue;
+		const FVector GL = EvalLanePoint(A, s, Hi, Settings.ZOffsetCm);
+		const FVector GR = EvalLanePoint(A, s, Lo, Settings.ZOffsetCm);
+		if (GL.ContainsNaN() || GR.ContainsNaN()) continue;
+		GatePts.Add(GL); GatePts.Add(GR);
+		FArm Arm; Arm.Road = A; Arm.Mid = (GL + GR) * 0.5; Arm.Ang = 0.0; Arms.Add(Arm);
 	}
-	if (Gates.Num() < 2) return false;
+	if (GatePts.Num() < 3 || Arms.Num() < 2) return false;
 
 	FVector Centroid = FVector::ZeroVector;
-	for (const FVector& P : Gates) Centroid += P;
-	Centroid /= (double)Gates.Num();
-
-	auto Radius2D = [&](const FVector& P) {
-		const double dx = P.X - Centroid.X, dy = P.Y - Centroid.Y;
-		return FMath::Sqrt(dx * dx + dy * dy);
-	};
-
-	// Candidates = incoming gates + connecting-road OUTER edges. For each connecting
-	// road sample we keep only the edge point FARTHER from the centroid: a connecting
-	// road sweeps through the junction interior, so its inner edge (and mid-span points
-	// near the centre) are interior — feeding them to the envelope produced the
-	// inward "sea-urchin" spikes. The outer edge alone traces the rounded corner.
-	TArray<FVector> Candidates = Gates;
-	for (roadmanager::Road* CR : Connecting)
-	{
-		const double len = CR->GetLength();
-		if (len <= KINDA_SMALL_NUMBER) continue;
-		const double step = FMath::Clamp(len / 8.0, 0.5, 2.0);
-		for (double s = 0.0; s <= len + 1e-3; s += step)
-		{
-			const double ss = FMath::Min(s, len);
-			roadmanager::LaneSection* Sec = CR->GetLaneSectionByS(ss);
-			bool bL, bR; FVector L, Rt;
-			BothEdges(CR, ss, Sec, bL, L, bR, Rt);
-			if (bL && bR)      Candidates.Add(Radius2D(L) >= Radius2D(Rt) ? L : Rt);
-			else if (bL)       Candidates.Add(L);
-			else if (bR)       Candidates.Add(Rt);
-		}
-	}
-
-	// Radial-max envelope: bin candidates by angle around the centroid and keep the
-	// farthest point per bin. Star-shaped by construction → always safe to fan.
-	const int NumBins = 120;
-	TArray<FVector> BinPt; BinPt.SetNum(NumBins);
-	TArray<float>   BinR;  BinR.Init(-1.f, NumBins);
-	for (const FVector& P : Candidates)
-	{
-		if (P.ContainsNaN()) continue;
-		const float r = (float)Radius2D(P);
-		const double ang = FMath::Atan2(P.Y - Centroid.Y, P.X - Centroid.X); // [-PI, PI]
-		int bin = (int)FMath::FloorToDouble((ang + PI) / (2.0 * PI) * NumBins);
-		bin = FMath::Clamp(bin, 0, NumBins - 1);
-		if (r > BinR[bin]) { BinR[bin] = r; BinPt[bin] = P; }
-	}
-
-	// Non-empty bins, already in angular order.
-	TArray<FVector> Boundary;
-	Boundary.Reserve(NumBins);
-	for (int b = 0; b < NumBins; ++b)
-	{
-		if (BinR[b] >= 0.f && !BinPt[b].ContainsNaN()) Boundary.Add(BinPt[b]);
-	}
-	if (Boundary.Num() < 3) return false;
+	for (const FVector& P : GatePts) Centroid += P;
+	Centroid /= (double)GatePts.Num();
 	if (Centroid.ContainsNaN()) return false;
 
-	const int N = Boundary.Num();
+	for (FArm& A : Arms) A.Ang = FMath::Atan2(A.Mid.Y - Centroid.Y, A.Mid.X - Centroid.X);
+	Arms.Sort([](const FArm& X, const FArm& Y) { return X.Ang < Y.Ang; });
 
-	// Decide winding from the polygon's signed area in XY so the fan always faces up
-	// (otherwise a back-facing fill gets culled and the landscape shows through — which
-	// looked like an un-materialed "tan" patch).
-	double SignedArea2 = 0.0;
-	for (int i = 0; i < N; ++i)
+	// Outer edge of a connecting road = the driving-strip edge (left=max-t or right=min-t)
+	// with the larger mean distance from the centroid. OutMinR = its closest approach to the
+	// centroid: large => the road hugs/rounds a corner; small => it dives through the centre.
+	// Only DISTANCES are compared, so this is invariant under the CoordTranslate Y-flip
+	// (which previously flipped a left/right test and produced the bow-tie).
+	auto OuterEdgeMinR = [&](roadmanager::Road* CR, TArray<FVector>& OutEdge, double& OutMinR)
 	{
-		const FVector& P0 = Boundary[i];
-		const FVector& P1 = Boundary[(i + 1) % N];
-		SignedArea2 += (P0.X - Centroid.X) * (P1.Y - Centroid.Y)
-		             - (P1.X - Centroid.X) * (P0.Y - Centroid.Y);
-	}
-	// UE is left-handed: a CW loop (negative signed area) fans into upward normals.
-	const bool bReverse = (SignedArea2 > 0.0);
+		OutEdge.Reset(); OutMinR = -1.0;
+		if (!CR) return;
+		const double len = CR->GetLength();
+		if (len <= KINDA_SMALL_NUMBER) return;
+		const int ns = FMath::Max(4, (int)(len / 0.4) + 1);
+		TArray<FVector> Le, Re;
+		for (int i = 0; i < ns; ++i)
+		{
+			const double s = len * (double)i / (double)(ns - 1);
+			roadmanager::LaneSection* Sec = CR->GetLaneSectionByS(s);
+			bool ok; double Lo, Hi; DrivingTRange(Sec, s, ok, Lo, Hi);
+			if (!ok) continue;
+			const FVector PL = EvalLanePoint(CR, s, Hi, Settings.ZOffsetCm);
+			const FVector PR = EvalLanePoint(CR, s, Lo, Settings.ZOffsetCm);
+			if (!PL.ContainsNaN()) Le.Add(PL);
+			if (!PR.ContainsNaN()) Re.Add(PR);
+		}
+		if (Le.Num() < 2 && Re.Num() < 2) return;
+		auto MeanR = [&](const TArray<FVector>& P) { double a = 0.0; for (const FVector& q : P) a += FVector::Dist2D(q, Centroid); return P.Num() ? a / P.Num() : 0.0; };
+		auto MinR  = [&](const TArray<FVector>& P) { double m = 1e30; for (const FVector& q : P) m = FMath::Min(m, (double)FVector::Dist2D(q, Centroid)); return m; };
+		OutEdge = (MeanR(Le) >= MeanR(Re)) ? Le : Re;
+		OutMinR = MinR(OutEdge);
+	};
 
-	OutBuffers.Vertices.Reserve(N + 1);
-	OutBuffers.UV0.Reserve(N + 1);
-	OutBuffers.Triangles.Reserve(N);
-	OutBuffers.TriGroupIDs.Reserve(N);
-
-	OutBuffers.Vertices.Add(Centroid);
-	OutBuffers.UV0.Add(FVector2D(0.5f, 0.5f));
-	for (int i = 0; i < N; ++i)
+	// Boundary loop: for each angularly-adjacent arm pair, the connecting road joining them
+	// whose outer edge hugs the corner most (largest OutMinR). Arcs chained in arm order.
+	TArray<FVector> Loop;
+	const int NA = Arms.Num();
+	for (int i = 0; i < NA; ++i)
 	{
-		OutBuffers.Vertices.Add(Boundary[i]);
-		const double ang = FMath::Atan2(Boundary[i].Y - Centroid.Y, Boundary[i].X - Centroid.X);
-		OutBuffers.UV0.Add(FVector2D(
-			(float)(0.5 + 0.5 * FMath::Cos(ang)),
-			(float)(0.5 + 0.5 * FMath::Sin(ang))));
+		roadmanager::Road* A = Arms[i].Road;
+		roadmanager::Road* B = Arms[(i + 1) % NA].Road;
+		TArray<FVector> Best; double BestMin = -1.0;
+		for (const FJConn& C : Conns)
+		{
+			if (!C.Con) continue;
+			if (!((C.In == A && C.Out == B) || (C.In == B && C.Out == A))) continue;
+			TArray<FVector> E; double mn; OuterEdgeMinR(C.Con, E, mn);
+			if (E.Num() >= 2 && mn > BestMin) { BestMin = mn; Best = E; }
+		}
+		if (Best.Num() < 2) continue;
+		// orient A -> B so consecutive arcs chain end-to-end.
+		if (FVector::Dist2D(Best[0], Arms[i].Mid) > FVector::Dist2D(Best.Last(), Arms[i].Mid))
+			for (int x = 0, y = Best.Num() - 1; x < y; ++x, --y) Swap(Best[x], Best[y]);
+		Loop.Append(Best);
 	}
+	if (Loop.Num() < 3) return false;
+
+	// Triangulate the chained outline by ear clipping (handles the concave outline, no hub).
+	TArray<FIntVector> Tris;
+	EarClipPolygon(Loop, Tris);
+	if (Tris.Num() < 1) return false;
+
+	FVector LC = FVector::ZeroVector;
+	for (const FVector& P : Loop) LC += P;
+	LC /= (double)Loop.Num();
+	double RMax = 1.0;
+	for (const FVector& P : Loop) RMax = FMath::Max(RMax, (double)FVector::Dist2D(P, LC));
 
 	const int32 Mat = (int32)ERoadMeshMaterialSlot::Asphalt;
-	for (int i = 0; i < N; ++i)
+	const int N = Loop.Num();
+	OutBuffers.Vertices.Reserve(N);
+	OutBuffers.Normals.Reserve(N);
+	OutBuffers.UV0.Reserve(N);
+	OutBuffers.Triangles.Reserve(Tris.Num());
+	OutBuffers.TriGroupIDs.Reserve(Tris.Num());
+	for (const FVector& P : Loop)
 	{
-		const int32 A = 0;
-		const int32 B = 1 + i;
-		const int32 C = 1 + ((i + 1) % N);
-
-		// Skip degenerate (near-zero-area) triangles. Slivers have unstable face
-		// normals, and RecomputeNormals averages those into the shared overlay,
-		// which is what made the patch shade as if in shadow.
-		const FVector& VA = OutBuffers.Vertices[A];
-		const FVector& VB = OutBuffers.Vertices[B];
-		const FVector& VC = OutBuffers.Vertices[C];
-		const double Area2 = FVector::CrossProduct(VB - VA, VC - VA).Size();
-		if (Area2 < 1.0) continue; // < ~0.5 cm^2 projected area
-
-		OutBuffers.Triangles.Add(bReverse ? FIntVector(A, C, B) : FIntVector(A, B, C));
+		OutBuffers.Vertices.Add(P);
+		OutBuffers.Normals.Add(FVector::UpVector);
+		OutBuffers.UV0.Add(FVector2D(0.5f + 0.5f * (float)((P.X - LC.X) / RMax), 0.5f + 0.5f * (float)((P.Y - LC.Y) / RMax)));
+	}
+	for (const FIntVector& T : Tris)
+	{
+		OutBuffers.Triangles.Add(T);
 		OutBuffers.TriGroupIDs.Add(Mat);
 	}
+
+	OrientTrianglesUp(OutBuffers);
 
 	if (OutBuffers.Triangles.Num() < 1) return false;
 
@@ -840,9 +937,11 @@ void FRoadMeshGenerator::GenerateRoadMesh(UWorld* World)
 		}
 	}
 
-	// Normals
-	FGeometryScriptCalculateNormalsOptions NormOpt;
-	UGeometryScriptLibrary_MeshNormalsFunctions::RecomputeNormals(Mesh, NormOpt, /*bDefer=*/false, nullptr);
+	// Normals are supplied per-vertex by each Build*Buffers call and written straight into
+	// the normal overlay by AppendBuffersToMesh. We deliberately do NOT call RecomputeNormals
+	// here: on this assembled mesh it was leaving the overlay effectively unset (the component
+	// then fell back to tangent-derived normals -> flat/grey "hazy" shading). The component's
+	// AutoCalculated tangents are derived from these normals + the UVs.
 
 	Actor->MeshComp->NotifyMeshUpdated();
 
