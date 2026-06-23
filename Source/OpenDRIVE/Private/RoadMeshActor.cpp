@@ -35,6 +35,14 @@ void ARoadMeshActor::ApplyDefaultMaterials()
 void ARoadMeshActor::EnableCollision()
 {
 	if (!MeshComp) return;
+
+	// UDynamicMeshComponent defaults to the NoCollision profile, and
+	// EnableComplexAsSimpleCollision() only flips the complex-as-simple trace flag — it does
+	// NOT enable the BodyInstance, so without this the physics state (and queryable collision)
+	// is never created. Enable query+physics with a blocking profile so vehicles / line traces
+	// actually collide with the road surface, then build the complex-as-simple body.
+	MeshComp->SetCollisionProfileName(TEXT("BlockAll"));
+	MeshComp->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 	MeshComp->EnableComplexAsSimpleCollision();
 	MeshComp->UpdateCollision(/*bOnlyIfPending=*/false);
 }

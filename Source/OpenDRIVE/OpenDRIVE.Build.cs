@@ -16,7 +16,8 @@ public class OpenDRIVE : ModuleRules
 				"RoadManager",
 				"Projects",
 				"GeometryFramework",
-				"GeometryCore"
+				"GeometryCore",
+				"GeometryScriptingCore"   // OpenDRIVEMeshMath: AppendBuffersToMesh / FGeometryScriptSimpleMeshBuffers
 			}
 		);
 

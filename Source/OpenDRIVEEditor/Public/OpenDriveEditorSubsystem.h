@@ -143,6 +143,42 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "OpenDRIVE|RoadMesh")
 	void SetRoadMeshMarkingZOffset(float MarkingZOffsetCm);
 
+	/** Toggle generation of road markings. Default: true. */
+	UFUNCTION(BlueprintCallable, Category = "OpenDRIVE|RoadMesh")
+	void SetRoadMeshGenerateMarkings(bool bGenerate);
+
+	/** Toggle generation of junction fill patches. Default: true. */
+	UFUNCTION(BlueprintCallable, Category = "OpenDRIVE|RoadMesh")
+	void SetRoadMeshGenerateJunctionPatches(bool bGenerate);
+
+	/** Toggle generation of non-driving lane surfaces (sidewalk/border/shoulder/...). Default: true. */
+	UFUNCTION(BlueprintCallable, Category = "OpenDRIVE|RoadMesh")
+	void SetRoadMeshGenerateNonDrivingLanes(bool bGenerate);
+
+	/** Set the raised-curb height (cm). 0 = flat surface, no curb step. Default: 15. */
+	UFUNCTION(BlueprintCallable, Category = "OpenDRIVE|RoadMesh")
+	void SetRoadMeshCurbHeight(float CurbHeightCm);
+
+	/** Set the at-grade road slab thickness (cm). 0 = paper-thin ribbon. Default: 50. */
+	UFUNCTION(BlueprintCallable, Category = "OpenDRIVE|RoadMesh")
+	void SetRoadMeshRoadThickness(float RoadThicknessCm);
+
+	/** Toggle the overpass deck structure (slab + parapets + piers on elevated spans). Default: false. */
+	UFUNCTION(BlueprintCallable, Category = "OpenDRIVE|RoadMesh")
+	void SetRoadMeshGenerateDeckStructure(bool bGenerate);
+
+	/** Set all overpass-deck numeric parameters at once (cm/m as per each field). */
+	UFUNCTION(BlueprintCallable, Category = "OpenDRIVE|RoadMesh")
+	void SetRoadMeshDeckParams(
+		float DeckHeightThresholdMeters,
+		float GroundZCm,
+		float DeckThicknessCm,
+		float ParapetHeightCm,
+		float ParapetThicknessCm,
+		float PierSpacingMeters,
+		float PierHalfWidthCm,
+		float PierRoadClearanceMeters);
+
 	/** Assign material slot 0..N for ERoadMeshMaterialSlot. */
 	UFUNCTION(BlueprintCallable, Category = "OpenDRIVE|RoadMesh")
 	void SetRoadMeshMaterials(const TArray<UMaterialInterface*>& Materials);

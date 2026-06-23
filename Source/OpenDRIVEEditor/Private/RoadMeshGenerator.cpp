@@ -3,195 +3,77 @@
 #include "RoadMeshGenerator.h"
 
 #include "RoadMeshActor.h"
-#include "CoordTranslate.h"
+#include "OpenDRIVEMeshMath.h"   // runtime geometry core (single source of truth)
 #include "RoadManager.hpp"
 
 #include "Engine/World.h"
 #include "Components/DynamicMeshComponent.h"
 #include "UDynamicMesh.h"
 #include "GeometryScript/MeshBasicEditFunctions.h"
-#include "GeometryScript/MeshNormalsFunctions.h"
 #include "GeometryScript/GeometryScriptTypes.h"
 #include "Materials/MaterialInterface.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetRegistry/IAssetRegistry.h"
-#include "Engine/AssetManager.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogOpenDriveRoadMesh, Log, All);
 
 namespace
 {
-	/** Sample a single (s, t) position on a road into a UE world-space FVector (in cm). */
-	FVector EvalLanePoint(roadmanager::Road* Road, double s, double tOffset, double ZOffsetCm)
-	{
-		roadmanager::Position P;
-		P.SetTrackPos(Road->GetId(), s, tOffset, true);
-		FVector L = CoordTranslate::OdrToUe::ToLocation(P);
-		L.Z += ZOffsetCm;
-		return L;
-	}
+	// --- Deck pier-avoidance / parapet helpers (file-local; used by the deck pass) ----
 
-	/** True when this Road is a "connecting road" inside a junction (xodr <road junction="N"> with N >= 0). */
-	bool IsConnectingRoad(roadmanager::Road* R)
+	// XY point-in-polygon (even-odd ray cast). Poly is an open ring (last connects to first).
+	bool PointInPoly2D(const TArray<FVector2D>& Poly, const FVector2D& P)
 	{
-		return R && R->GetJunction() >= 0;
-	}
-
-	/** True only for LANE_TYPE_DRIVING. Other paved types (bidirectional, ramps) and
-	 *  non-paved types (sidewalk, biking, shoulder, parking, border, etc.) keep their
-	 *  per-lane strip even on connecting roads — the junction fill only replaces the
-	 *  driving surface. */
-	bool IsDrivingLane(int32 LaneType)
-	{
-		return LaneType == (int32)roadmanager::Lane::LaneType::LANE_TYPE_DRIVING;
-	}
-
-	/** Flip each triangle's winding so its UE front face points up. Roads and markings are
-	 *  walked-on surfaces, so the top face should always be the front face; this stops
-	 *  one-sided materials from being culled (or rendered inside-out) from above. It replaces
-	 *  the old per-lane-sign hardcoded winding, which got the centerline (lane 0) and one
-	 *  road side backwards. Vertex normals are forced up separately, so geometry facing and
-	 *  shading normals stay consistent.
-	 *
-	 *  Sign note: UE is left-handed and its front-face normal is the NEGATIVE of the
-	 *  textbook cross product (v1-v0)x(v2-v0). So the front face points up exactly when that
-	 *  cross product's Z is NEGATIVE; we flip when it is positive. (Verified against the
-	 *  original working lane winding, whose cross-Z is negative.) */
-	void OrientTrianglesUp(FGeometryScriptSimpleMeshBuffers& Buf)
-	{
-		for (FIntVector& T : Buf.Triangles)
+		bool bIn = false;
+		const int32 n = Poly.Num();
+		for (int32 i = 0, j = n - 1; i < n; j = i++)
 		{
-			const FVector& v0 = Buf.Vertices[T.X];
-			const FVector& v1 = Buf.Vertices[T.Y];
-			const FVector& v2 = Buf.Vertices[T.Z];
-			if (FVector::CrossProduct(v1 - v0, v2 - v0).Z > 0.0)
+			const FVector2D& A = Poly[i];
+			const FVector2D& B = Poly[j];
+			if (((A.Y > P.Y) != (B.Y > P.Y)) &&
+				(P.X < (B.X - A.X) * (P.Y - A.Y) / (B.Y - A.Y + KINDA_SMALL_NUMBER) + A.X))
 			{
-				Swap(T.Y, T.Z);
+				bIn = !bIn;
 			}
 		}
+		return bIn;
 	}
 
-	/** Ear-clip a simple polygon (XY) given in order. Index triples into Poly. Handles concave
-	 *  polygons without a centroid hub, so it triangulates the junction outline directly. */
-	void EarClipPolygon(const TArray<FVector>& Poly, TArray<FIntVector>& OutTris)
+	// Squared XY distance from P to the nearest polygon edge.
+	double DistToPolyEdgesSq2D(const TArray<FVector2D>& Poly, const FVector2D& P)
 	{
-		const int n = Poly.Num();
-		if (n < 3) return;
-		auto Cross = [](const FVector& a, const FVector& b, const FVector& c)
-		{ return (b.X - a.X) * (c.Y - a.Y) - (b.Y - a.Y) * (c.X - a.X); };
-
-		double area2 = 0.0;
-		for (int i = 0; i < n; ++i) { const FVector& a = Poly[i]; const FVector& b = Poly[(i + 1) % n]; area2 += a.X * b.Y - b.X * a.Y; }
-		TArray<int> V; V.SetNum(n);
-		for (int i = 0; i < n; ++i) V[i] = (area2 >= 0.0) ? i : (n - 1 - i);
-
-		auto InTri = [&](const FVector& p, const FVector& a, const FVector& b, const FVector& c)
+		double Best = TNumericLimits<double>::Max();
+		const int32 n = Poly.Num();
+		for (int32 i = 0, j = n - 1; i < n; j = i++)
 		{
-			const double d1 = Cross(p, a, b), d2 = Cross(p, b, c), d3 = Cross(p, c, a);
-			const bool neg = (d1 < 0) || (d2 < 0) || (d3 < 0);
-			const bool pos = (d1 > 0) || (d2 > 0) || (d3 > 0);
-			return !(neg && pos);
-		};
-
-		int guard = 0;
-		while (V.Num() > 3 && guard++ < 100000)
-		{
-			const int m = V.Num();
-			bool clipped = false;
-			for (int k = 0; k < m; ++k)
-			{
-				const int i0 = V[(k + m - 1) % m], i1 = V[k], i2 = V[(k + 1) % m];
-				const FVector& a = Poly[i0]; const FVector& b = Poly[i1]; const FVector& c = Poly[i2];
-				if (Cross(a, b, c) <= 0.0) continue;
-				bool ear = true;
-				for (int j = 0; j < m; ++j)
-				{
-					const int vj = V[j];
-					if (vj == i0 || vj == i1 || vj == i2) continue;
-					if (InTri(Poly[vj], a, b, c)) { ear = false; break; }
-				}
-				if (!ear) continue;
-				OutTris.Add(FIntVector(i0, i1, i2));
-				V.RemoveAt(k);
-				clipped = true;
-				break;
-			}
-			if (!clipped) break;
+			const FVector2D& A = Poly[j];
+			const FVector2D& B = Poly[i];
+			const FVector2D AB = B - A;
+			const double L2 = FVector2D::DotProduct(AB, AB);
+			double t = (L2 > 0.0) ? (double)FVector2D::DotProduct(P - A, AB) / L2 : 0.0;
+			t = FMath::Clamp(t, 0.0, 1.0);
+			const FVector2D Proj = A + AB * t;
+			Best = FMath::Min(Best, (double)FVector2D::DistSquared(P, Proj));
 		}
-		if (V.Num() == 3) OutTris.Add(FIntVector(V[0], V[1], V[2]));
-	}
-
-	/** If Road R touches Junction(jid) via SUCC or PRED, fill OutS with the junction-facing
-	 *  s value (0 or road length) and OutSec with the lane section at that s. */
-	bool GetJunctionFacingSection(
-		roadmanager::Road* R, int jid,
-		double& OutS, roadmanager::LaneSection*& OutSec)
-	{
-		OutS = 0.0;
-		OutSec = nullptr;
-		if (!R) return false;
-
-		auto Touches = [&](roadmanager::LinkType T) {
-			roadmanager::RoadLink* L = R->GetLink(T);
-			return L
-				&& L->GetElementType() == roadmanager::RoadLink::ELEMENT_TYPE_JUNCTION
-				&& L->GetElementId() == jid;
-		};
-
-		const int n = R->GetNumberOfLaneSections();
-		if (n <= 0) return false;
-
-		if (Touches(roadmanager::SUCCESSOR))
-		{
-			OutS = R->GetLength();
-			OutSec = R->GetLaneSectionByIdx(n - 1);
-		}
-		else if (Touches(roadmanager::PREDECESSOR))
-		{
-			OutS = 0.0;
-			OutSec = R->GetLaneSectionByIdx(0);
-		}
-		return OutSec != nullptr;
-	}
-
-	/** The road linked at the connecting road's far end (the end NOT joined to Incoming).
-	 *  Implemented with plain RoadLink lookups because the newer
-	 *  Junction::GetRoadAtOtherEndOfConnectingRoad is declared in the header but is NOT
-	 *  exported by the prebuilt RoadManager.lib this plugin links against. */
-	roadmanager::Road* RoadAtOtherEnd(roadmanager::Road* Connecting, roadmanager::Road* Incoming)
-	{
-		if (!Connecting || !Incoming) return nullptr;
-		roadmanager::OpenDrive* Odr = roadmanager::Position::GetOpenDrive();
-		if (!Odr) return nullptr;
-		const int InId = Incoming->GetId();
-		const roadmanager::LinkType Ends[2] = { roadmanager::PREDECESSOR, roadmanager::SUCCESSOR };
-		for (roadmanager::LinkType T : Ends)
-		{
-			roadmanager::RoadLink* Lnk = Connecting->GetLink(T);
-			if (!Lnk) continue;
-			if (Lnk->GetElementType() != roadmanager::RoadLink::ELEMENT_TYPE_ROAD) continue;
-			const int Eid = Lnk->GetElementId();
-			if (Eid == InId) continue; // this end is the incoming road
-			if (roadmanager::Road* R = Odr->GetRoadById(Eid)) return R;
-		}
-		return nullptr;
+		return Best;
 	}
 
 	/**
 	 * Scan a Content folder for UMaterialInterface assets and assign them to ERoadMeshMaterialSlot
 	 * by name keyword. Matching is case-insensitive on the asset name.
-	 *   Asphalt/Driving/Road  -> slot 0 (Asphalt)
-	 *   Sidewalk/Walk         -> slot 1 (Sidewalk)
-	 *   Border/Shoulder/Curb  -> slot 2 (Border)
-	 *   Mark/Line/Stripe      -> slot 3 (Marking)
-	 *   otherwise             -> slot 4 (Misc)
+	 *   Asphalt/Driving/Road        -> slot 0 (Asphalt)
+	 *   Sidewalk/Walk               -> slot 1 (Sidewalk)
+	 *   Border/Shoulder/Curb        -> slot 2 (Border)
+	 *   Mark/Line/Stripe            -> slot 3 (Marking)
+	 *   Deck/Bridge/Overpass/Struct -> slot 5 (Deck / Structure)
+	 *   otherwise                   -> slot 4 (Misc)
 	 *
 	 * Returns an array sized to the number of slots, with nullptr where no match was found.
 	 */
 	TArray<UMaterialInterface*> DiscoverMaterialsAtPath(const FString& ContentFolderPath)
 	{
 		TArray<UMaterialInterface*> Out;
-		Out.Init(nullptr, 5);
+		Out.Init(nullptr, (int32)ERoadMeshMaterialSlot::Deck + 1); // 6 slots
 
 		FAssetRegistryModule& ARM = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
 		IAssetRegistry& AR = ARM.Get();
@@ -212,17 +94,21 @@ namespace
 			int32 SlotMatch = -1;
 			if      (Name.Contains(TEXT("Asphalt"), ESearchCase::IgnoreCase) ||
 			         Name.Contains(TEXT("Driving"), ESearchCase::IgnoreCase) ||
-			         Name.Contains(TEXT("Road"),    ESearchCase::IgnoreCase)) SlotMatch = 0;
+			         Name.Contains(TEXT("Road"),    ESearchCase::IgnoreCase)) SlotMatch = (int32)ERoadMeshMaterialSlot::Asphalt;
 			else if (Name.Contains(TEXT("Sidewalk"), ESearchCase::IgnoreCase) ||
-			         Name.Contains(TEXT("Walk"),     ESearchCase::IgnoreCase)) SlotMatch = 1;
+			         Name.Contains(TEXT("Walk"),     ESearchCase::IgnoreCase)) SlotMatch = (int32)ERoadMeshMaterialSlot::Sidewalk;
 			else if (Name.Contains(TEXT("Border"),   ESearchCase::IgnoreCase) ||
 			         Name.Contains(TEXT("Shoulder"), ESearchCase::IgnoreCase) ||
-			         Name.Contains(TEXT("Curb"),     ESearchCase::IgnoreCase)) SlotMatch = 2;
+			         Name.Contains(TEXT("Curb"),     ESearchCase::IgnoreCase)) SlotMatch = (int32)ERoadMeshMaterialSlot::Border;
 			else if (Name.Contains(TEXT("Mark"),   ESearchCase::IgnoreCase) ||
 			         Name.Contains(TEXT("Line"),   ESearchCase::IgnoreCase) ||
-			         Name.Contains(TEXT("Stripe"), ESearchCase::IgnoreCase)) SlotMatch = 3;
+			         Name.Contains(TEXT("Stripe"), ESearchCase::IgnoreCase)) SlotMatch = (int32)ERoadMeshMaterialSlot::Marking;
+			else if (Name.Contains(TEXT("Deck"),     ESearchCase::IgnoreCase) ||
+			         Name.Contains(TEXT("Bridge"),   ESearchCase::IgnoreCase) ||
+			         Name.Contains(TEXT("Overpass"), ESearchCase::IgnoreCase) ||
+			         Name.Contains(TEXT("Structure"),ESearchCase::IgnoreCase)) SlotMatch = (int32)ERoadMeshMaterialSlot::Deck;
 			else
-				SlotMatch = 4;
+				SlotMatch = (int32)ERoadMeshMaterialSlot::Misc;
 
 			if (SlotMatch >= 0 && SlotMatch < Out.Num() && Out[SlotMatch] == nullptr)
 			{
@@ -234,522 +120,6 @@ namespace
 		}
 		return Out;
 	}
-}
-
-TArray<double> FRoadMeshGenerator::BuildSList(roadmanager::Road* Road, roadmanager::LaneSection* Sec, double SectionStartS) const
-{
-	TArray<double> SList;
-	if (!Road || !Sec) return SList;
-
-	const double SecLen = Sec->GetLength();
-	const double SecEnd = SectionStartS + SecLen;
-	const double MaxStep = FMath::Max((double)Settings.MaxStepMeters, 0.05);
-	const double MinStep = FMath::Max((double)Settings.MinStepMeters, 0.01);
-
-	// Curvature-adaptive: union of OSI s-values from every lane in this section.
-	// OSI points are pre-sampled by esmini with curvature awareness.
-	TSet<double> SSet;
-	SSet.Add(SectionStartS);
-	SSet.Add(SecEnd);
-
-	const int32 NumLanes = Sec->GetNumberOfLanes();
-	for (int32 li = 0; li < NumLanes; ++li)
-	{
-		roadmanager::Lane* L = Sec->GetLaneByIdx(li);
-		if (!L) continue;
-		auto* OSI = L->GetOSIPoints();
-		if (!OSI) continue;
-		const auto& Points = OSI->GetPoints();
-		for (const auto& P : Points)
-		{
-			if (P.s >= SectionStartS - 1e-6 && P.s <= SecEnd + 1e-6)
-			{
-				SSet.Add(FMath::Clamp((double)P.s, SectionStartS, SecEnd));
-			}
-		}
-	}
-
-	SList = SSet.Array();
-	SList.Sort();
-
-	// Enforce MaxStep by inserting splits where gaps exceed it
-	TArray<double> Out;
-	Out.Reserve(SList.Num() * 2);
-	for (int32 i = 0; i < SList.Num(); ++i)
-	{
-		if (i > 0)
-		{
-			const double Prev = SList[i - 1];
-			const double Cur = SList[i];
-			const double Gap = Cur - Prev;
-			if (Gap > MaxStep)
-			{
-				const int32 NumSplits = (int32)FMath::FloorToDouble(Gap / MaxStep);
-				const double Step = Gap / (NumSplits + 1);
-				for (int32 k = 1; k <= NumSplits; ++k)
-				{
-					Out.Add(Prev + k * Step);
-				}
-			}
-		}
-		Out.Add(SList[i]);
-	}
-
-	// Coalesce too-close samples
-	TArray<double> Final;
-	Final.Reserve(Out.Num());
-	for (int32 i = 0; i < Out.Num(); ++i)
-	{
-		if (Final.Num() == 0 || (Out[i] - Final.Last()) > MinStep || i == Out.Num() - 1)
-		{
-			if (Final.Num() > 0 && i == Out.Num() - 1 && (Out[i] - Final.Last()) <= MinStep)
-			{
-				Final.Last() = Out[i];
-			}
-			else
-			{
-				Final.Add(Out[i]);
-			}
-		}
-	}
-	return Final;
-}
-
-bool FRoadMeshGenerator::BuildLaneStripBuffers(
-	roadmanager::Road* Road,
-	roadmanager::LaneSection* Sec,
-	roadmanager::Lane* Lane,
-	const TArray<double>& SList,
-	FGeometryScriptSimpleMeshBuffers& OutBuffers,
-	int32& OutMaterialID) const
-{
-	const int32 LaneId = Lane->GetId();
-	if (LaneId == 0) return false;
-
-	const int32 InnerId = (LaneId > 0) ? (LaneId - 1) : (LaneId + 1);
-	const double TotalLen = Road->GetLength();
-
-	const int32 N = SList.Num();
-	if (N < 2) return false;
-
-	OutBuffers.Vertices.Reserve(N * 2);
-	OutBuffers.UV0.Reserve(N * 2);
-
-	// SIGN: esmini's GetOuterOffset always returns the absolute distance from the
-	// reference line (see RoadManager.cpp). Real t is signed by lane side:
-	// positive lane -> +t (left of heading), negative lane -> -t (right of heading).
-	// Match roadgeom.cpp:733 which does: SIGN(lane->GetId()) * GetOuterOffset(...).
-	const int32 Sign = (LaneId > 0) ? 1 : -1;
-
-	bool bHasAnyWidth = false;
-
-	for (int32 i = 0; i < N; ++i)
-	{
-		const double s = SList[i];
-		const double tInner = Sign * Sec->GetOuterOffset(s, InnerId);
-		const double tOuter = Sign * Sec->GetOuterOffset(s, LaneId);
-
-		const FVector PInner = EvalLanePoint(Road, s, tInner, Settings.ZOffsetCm);
-		const FVector POuter = EvalLanePoint(Road, s, tOuter, Settings.ZOffsetCm);
-
-		OutBuffers.Vertices.Add(PInner);
-		OutBuffers.Vertices.Add(POuter);
-
-		const float U = (TotalLen > 0.0) ? (float)(s / TotalLen) : 0.f;
-		OutBuffers.UV0.Add(FVector2D(U, 0.0f));
-		OutBuffers.UV0.Add(FVector2D(U, 1.0f));
-
-		if (FMath::Abs(tOuter - tInner) > 1e-4)
-		{
-			bHasAnyWidth = true;
-		}
-	}
-
-	if (!bHasAnyWidth) return false;
-
-	// Per-vertex normals from the local surface frame (along-s x across-t), forced upward.
-	// We write them into the buffer instead of relying on a post-build RecomputeNormals:
-	// AppendBuffersToMesh on a normal-less buffer left the normal overlay unset, so the
-	// DynamicMeshComponent fell back to tangent-derived normals — which is why the surface
-	// shaded flat/grey ("hazy") and the World-Normal debug view showed the road-direction
-	// (tangent) colour instead of up-blue.
-	OutBuffers.Normals.SetNum(N * 2);
-	for (int32 i = 0; i < N; ++i)
-	{
-		int32 a = i, b = i + 1;
-		if (b >= N) { a = i - 1; b = i; }                 // last row: backward difference
-		const FVector AlongS  = OutBuffers.Vertices[2 * b] - OutBuffers.Vertices[2 * a];
-		const FVector AcrossT = OutBuffers.Vertices[2 * i + 1] - OutBuffers.Vertices[2 * i];
-		FVector Nrm = FVector::CrossProduct(AlongS, AcrossT);
-		if (!Nrm.Normalize()) Nrm = FVector::UpVector;
-		if (Nrm.Z < 0.f) Nrm = -Nrm;                      // road surface normals point up
-		OutBuffers.Normals[2 * i]     = Nrm;
-		OutBuffers.Normals[2 * i + 1] = Nrm;
-	}
-
-	// Emit two triangles per quad with a provisional winding; OrientTrianglesUp() below
-	// flips any that end up facing down, so the visible face is always the top regardless
-	// of lane side or the CoordTranslate Y-flip.
-	for (int32 i = 0; i + 1 < N; ++i)
-	{
-		const int32 A = 2 * i;       // inner at s_i
-		const int32 B = 2 * i + 1;   // outer at s_i
-		const int32 C = 2 * (i + 1); // inner at s_{i+1}
-		const int32 D = 2 * (i + 1) + 1; // outer at s_{i+1}
-
-		OutBuffers.Triangles.Add(FIntVector(A, C, B));
-		OutBuffers.Triangles.Add(FIntVector(B, C, D));
-		OutBuffers.TriGroupIDs.Add(LaneId);
-		OutBuffers.TriGroupIDs.Add(LaneId);
-	}
-
-	OrientTrianglesUp(OutBuffers);
-
-	OutMaterialID = FRoadMeshSettings::SlotForLaneType((int32)Lane->GetLaneType());
-	return true;
-}
-
-void FRoadMeshGenerator::AppendRoadMarksForLane(
-	UDynamicMesh* Mesh,
-	roadmanager::Road* Road,
-	roadmanager::LaneSection* Sec,
-	roadmanager::Lane* Lane,
-	double SectionStartS,
-	double SectionLength,
-	int32& OutMarkTriCount) const
-{
-	OutMarkTriCount = 0;
-	if (!Mesh || !Lane) return;
-
-	const int32 LaneId = Lane->GetId();
-	// NOTE: lane 0 (reference line) commonly carries the centerline mark — do NOT skip it here.
-
-	const int32 NumMarks = Lane->GetNumberOfRoadMarks();
-	if (NumMarks == 0) return;
-
-	const double SectionEndS = SectionStartS + SectionLength;
-	const double TotalLen = Road->GetLength();
-	const float Z = Settings.ZOffsetCm + Settings.MarkingZOffsetCm;
-	const float StepM = FMath::Max((float)Settings.MaxStepMeters, 0.1f);
-
-	// SIGN: GetOuterOffset returns unsigned distance from reference line — apply lane side.
-	// For lane 0 (reference line), the outer offset is 0, so the sign is irrelevant.
-	const int32 Sign = (LaneId >= 0) ? 1 : -1;
-
-	// Helper: emit a continuous strip from s0..s1 along the lane's outer edge,
-	// with width (m) and color-derived material slot.
-	auto EmitMarkStrip = [&](double s0, double s1, double widthM, int32 MatID)
-	{
-		if (widthM <= 0.0) return;
-		s0 = FMath::Clamp(s0, SectionStartS, SectionEndS);
-		s1 = FMath::Clamp(s1, SectionStartS, SectionEndS);
-		if (s1 - s0 < 1e-3) return;
-
-		// Build s-list across [s0, s1]
-		TArray<double> SS;
-		for (double s = s0; s < s1 - KINDA_SMALL_NUMBER; s += StepM)
-		{
-			SS.Add(s);
-		}
-		SS.Add(s1);
-
-		const int32 N = SS.Num();
-		if (N < 2) return;
-
-		FGeometryScriptSimpleMeshBuffers B;
-		B.Vertices.Reserve(N * 2);
-		B.UV0.Reserve(N * 2);
-
-		const double Half = widthM * 0.5;
-
-		for (int32 i = 0; i < N; ++i)
-		{
-			const double s = SS[i];
-			const double tOuter = Sign * Sec->GetOuterOffset(s, LaneId);
-			// Mark straddles the outer edge: [tOuter - half, tOuter + half] in t-space.
-			const double tLow = tOuter - Half;
-			const double tHigh = tOuter + Half;
-
-			const FVector PLow  = EvalLanePoint(Road, s, tLow, Z);
-			const FVector PHigh = EvalLanePoint(Road, s, tHigh, Z);
-			B.Vertices.Add(PLow);
-			B.Vertices.Add(PHigh);
-
-			const float U = (TotalLen > 0.0) ? (float)(s / TotalLen) : 0.f;
-			B.UV0.Add(FVector2D(U, 0.0f));
-			B.UV0.Add(FVector2D(U, 1.0f));
-		}
-
-		// Per-vertex up-facing normals (see BuildLaneStripBuffers for the rationale).
-		B.Normals.SetNum(N * 2);
-		for (int32 i = 0; i < N; ++i)
-		{
-			int32 a = i, b = i + 1;
-			if (b >= N) { a = i - 1; b = i; }
-			const FVector AlongS  = B.Vertices[2 * b] - B.Vertices[2 * a];
-			const FVector AcrossT = B.Vertices[2 * i + 1] - B.Vertices[2 * i];
-			FVector Nrm = FVector::CrossProduct(AlongS, AcrossT);
-			if (!Nrm.Normalize()) Nrm = FVector::UpVector;
-			if (Nrm.Z < 0.f) Nrm = -Nrm;
-			B.Normals[2 * i]     = Nrm;
-			B.Normals[2 * i + 1] = Nrm;
-		}
-
-		for (int32 i = 0; i + 1 < N; ++i)
-		{
-			const int32 A = 2 * i;
-			const int32 Bv = 2 * i + 1;
-			const int32 C = 2 * (i + 1);
-			const int32 D = 2 * (i + 1) + 1;
-			B.Triangles.Add(FIntVector(A, C, Bv));
-			B.Triangles.Add(FIntVector(Bv, C, D));
-			B.TriGroupIDs.Add(LaneId);
-			B.TriGroupIDs.Add(LaneId);
-		}
-
-		// Same up-orientation fix as the lane strips: the old per-sign winding rendered the
-		// centerline (lane 0) and one side's marks inside-out.
-		OrientTrianglesUp(B);
-
-		FGeometryScriptIndexList NewTris;
-		UGeometryScriptLibrary_MeshBasicEditFunctions::AppendBuffersToMesh(
-			Mesh, B, NewTris, MatID, /*bDeferChangeNotifications=*/true, nullptr);
-		OutMarkTriCount += B.Triangles.Num();
-	};
-
-	for (int32 mi = 0; mi < NumMarks; ++mi)
-	{
-		roadmanager::LaneRoadMark* RM = Lane->GetLaneRoadMarkByIdx(mi);
-		if (!RM) continue;
-		const auto RType = RM->GetType();
-		if (RType == roadmanager::LaneRoadMark::RoadMarkType::NONE_TYPE) continue;
-
-		// Range along s for this mark: from s_offset to the next mark's s_offset (or section end).
-		const double MarkStart = SectionStartS + RM->GetSOffset();
-		double MarkEnd = SectionEndS;
-		if (mi + 1 < NumMarks)
-		{
-			roadmanager::LaneRoadMark* Next = Lane->GetLaneRoadMarkByIdx(mi + 1);
-			if (Next) MarkEnd = SectionStartS + Next->GetSOffset();
-		}
-		if (MarkEnd <= MarkStart) continue;
-
-		const int32 MatID = (int32)ERoadMeshMaterialSlot::Marking;
-		const double Width = (RM->GetWidth() > 0.0) ? RM->GetWidth() : 0.12;  // default 12cm
-
-		// If the mark has explicit type lines with dashed length/space, treat as BROKEN.
-		// Otherwise emit per-type.
-		auto EmitBroken = [&](double SegLen, double SegSpace, double LineWidth)
-		{
-			if (SegLen <= 0.0) SegLen = 3.0;
-			if (SegSpace < 0.0) SegSpace = 3.0;
-			for (double s = MarkStart; s < MarkEnd - KINDA_SMALL_NUMBER; s += SegLen + SegSpace)
-			{
-				const double e = FMath::Min(s + SegLen, MarkEnd);
-				EmitMarkStrip(s, e, LineWidth, MatID);
-			}
-		};
-
-		switch (RType)
-		{
-		case roadmanager::LaneRoadMark::RoadMarkType::SOLID:
-		case roadmanager::LaneRoadMark::RoadMarkType::CURB:
-			EmitMarkStrip(MarkStart, MarkEnd, Width, MatID);
-			break;
-		case roadmanager::LaneRoadMark::RoadMarkType::BROKEN:
-			EmitBroken(3.0, 3.0, Width);
-			break;
-		case roadmanager::LaneRoadMark::RoadMarkType::SOLID_SOLID:
-			// Approximate as a single thicker line for now
-			EmitMarkStrip(MarkStart, MarkEnd, Width * 2.5, MatID);
-			break;
-		case roadmanager::LaneRoadMark::RoadMarkType::SOLID_BROKEN:
-		case roadmanager::LaneRoadMark::RoadMarkType::BROKEN_SOLID:
-			EmitMarkStrip(MarkStart, MarkEnd, Width, MatID);
-			EmitBroken(3.0, 3.0, Width);
-			break;
-		case roadmanager::LaneRoadMark::RoadMarkType::BROKEN_BROKEN:
-			EmitBroken(3.0, 3.0, Width);
-			break;
-		case roadmanager::LaneRoadMark::RoadMarkType::BOTTS_DOTS:
-		case roadmanager::LaneRoadMark::RoadMarkType::GRASS:
-		default:
-			// Skip for now; needs special geometry
-			break;
-		}
-	}
-}
-
-bool FRoadMeshGenerator::BuildJunctionFillBuffers(
-	roadmanager::Junction* Junction,
-	FGeometryScriptSimpleMeshBuffers& OutBuffers,
-	int32& OutMaterialID) const
-{
-	if (!Junction) return false;
-	const int jid = Junction->GetId();
-
-	// Incoming roads anchor the junction mouths. Each connecting road joins two of them (an
-	// incoming arm and an outgoing arm); we keep that (In, Connecting, Out) topology so we
-	// can pick, per corner, the connecting road that actually forms that corner instead of
-	// guessing the outermost edge from a sampled envelope.
-	struct FJConn { roadmanager::Road* In; roadmanager::Road* Con; roadmanager::Road* Out; };
-	TArray<roadmanager::Road*> Incoming;
-	TArray<FJConn> Conns;
-	{
-		TSet<roadmanager::Road*> SeenIn;
-		const int nConn = Junction->GetNumberOfConnections();
-		for (int ci = 0; ci < nConn; ++ci)
-		{
-			roadmanager::Connection* Conn = Junction->GetConnectionByIdx(ci);
-			if (!Conn) continue;
-			roadmanager::Road* IR = Conn->GetIncomingRoad();
-			roadmanager::Road* CR = Conn->GetConnectingRoad();
-			if (!IR || !CR) continue;
-			if (!SeenIn.Contains(IR)) { SeenIn.Add(IR); Incoming.Add(IR); }
-			roadmanager::Road* OR = RoadAtOtherEnd(CR, IR);
-			Conns.Add({ IR, CR, OR });
-		}
-	}
-	if (Incoming.Num() < 2) return false;
-
-	// Drivable t-range [Lo,Hi] across all driving lanes of a section at s.
-	auto DrivingTRange = [&](roadmanager::LaneSection* Sec, double s, bool& bOK, double& Lo, double& Hi)
-	{
-		bOK = false; Lo = 0.0; Hi = 0.0;
-		if (!Sec) return;
-		const int nLanes = Sec->GetNumberOfLanes();
-		for (int li = 0; li < nLanes; ++li)
-		{
-			roadmanager::Lane* L = Sec->GetLaneByIdx(li);
-			if (!L) continue;
-			const int lid = L->GetId();
-			if (lid == 0 || !IsDrivingLane((int32)L->GetLaneType())) continue;
-			const int sgn = (lid > 0) ? 1 : -1;
-			const double outer = sgn * Sec->GetOuterOffset(s, lid);
-			const double inner = sgn * Sec->GetOuterOffset(s, lid - sgn);
-			const double a = FMath::Min(outer, inner), b = FMath::Max(outer, inner);
-			if (!bOK) { Lo = a; Hi = b; bOK = true; }
-			else { Lo = FMath::Min(Lo, a); Hi = FMath::Max(Hi, b); }
-		}
-	};
-
-	// Per-arm gate (full driving span at the junction-facing s) + centroid + angle.
-	struct FArm { roadmanager::Road* Road; FVector Mid; double Ang; };
-	TArray<FArm> Arms;
-	TArray<FVector> GatePts;
-	for (roadmanager::Road* A : Incoming)
-	{
-		double s = 0.0; roadmanager::LaneSection* Sec = nullptr;
-		if (!GetJunctionFacingSection(A, jid, s, Sec)) continue;
-		bool ok; double Lo, Hi; DrivingTRange(Sec, s, ok, Lo, Hi);
-		if (!ok) continue;
-		const FVector GL = EvalLanePoint(A, s, Hi, Settings.ZOffsetCm);
-		const FVector GR = EvalLanePoint(A, s, Lo, Settings.ZOffsetCm);
-		if (GL.ContainsNaN() || GR.ContainsNaN()) continue;
-		GatePts.Add(GL); GatePts.Add(GR);
-		FArm Arm; Arm.Road = A; Arm.Mid = (GL + GR) * 0.5; Arm.Ang = 0.0; Arms.Add(Arm);
-	}
-	if (GatePts.Num() < 3 || Arms.Num() < 2) return false;
-
-	FVector Centroid = FVector::ZeroVector;
-	for (const FVector& P : GatePts) Centroid += P;
-	Centroid /= (double)GatePts.Num();
-	if (Centroid.ContainsNaN()) return false;
-
-	for (FArm& A : Arms) A.Ang = FMath::Atan2(A.Mid.Y - Centroid.Y, A.Mid.X - Centroid.X);
-	Arms.Sort([](const FArm& X, const FArm& Y) { return X.Ang < Y.Ang; });
-
-	// Outer edge of a connecting road = the driving-strip edge (left=max-t or right=min-t)
-	// with the larger mean distance from the centroid. OutMinR = its closest approach to the
-	// centroid: large => the road hugs/rounds a corner; small => it dives through the centre.
-	// Only DISTANCES are compared, so this is invariant under the CoordTranslate Y-flip
-	// (which previously flipped a left/right test and produced the bow-tie).
-	auto OuterEdgeMinR = [&](roadmanager::Road* CR, TArray<FVector>& OutEdge, double& OutMinR)
-	{
-		OutEdge.Reset(); OutMinR = -1.0;
-		if (!CR) return;
-		const double len = CR->GetLength();
-		if (len <= KINDA_SMALL_NUMBER) return;
-		const int ns = FMath::Max(4, (int)(len / 0.4) + 1);
-		TArray<FVector> Le, Re;
-		for (int i = 0; i < ns; ++i)
-		{
-			const double s = len * (double)i / (double)(ns - 1);
-			roadmanager::LaneSection* Sec = CR->GetLaneSectionByS(s);
-			bool ok; double Lo, Hi; DrivingTRange(Sec, s, ok, Lo, Hi);
-			if (!ok) continue;
-			const FVector PL = EvalLanePoint(CR, s, Hi, Settings.ZOffsetCm);
-			const FVector PR = EvalLanePoint(CR, s, Lo, Settings.ZOffsetCm);
-			if (!PL.ContainsNaN()) Le.Add(PL);
-			if (!PR.ContainsNaN()) Re.Add(PR);
-		}
-		if (Le.Num() < 2 && Re.Num() < 2) return;
-		auto MeanR = [&](const TArray<FVector>& P) { double a = 0.0; for (const FVector& q : P) a += FVector::Dist2D(q, Centroid); return P.Num() ? a / P.Num() : 0.0; };
-		auto MinR  = [&](const TArray<FVector>& P) { double m = 1e30; for (const FVector& q : P) m = FMath::Min(m, (double)FVector::Dist2D(q, Centroid)); return m; };
-		OutEdge = (MeanR(Le) >= MeanR(Re)) ? Le : Re;
-		OutMinR = MinR(OutEdge);
-	};
-
-	// Boundary loop: for each angularly-adjacent arm pair, the connecting road joining them
-	// whose outer edge hugs the corner most (largest OutMinR). Arcs chained in arm order.
-	TArray<FVector> Loop;
-	const int NA = Arms.Num();
-	for (int i = 0; i < NA; ++i)
-	{
-		roadmanager::Road* A = Arms[i].Road;
-		roadmanager::Road* B = Arms[(i + 1) % NA].Road;
-		TArray<FVector> Best; double BestMin = -1.0;
-		for (const FJConn& C : Conns)
-		{
-			if (!C.Con) continue;
-			if (!((C.In == A && C.Out == B) || (C.In == B && C.Out == A))) continue;
-			TArray<FVector> E; double mn; OuterEdgeMinR(C.Con, E, mn);
-			if (E.Num() >= 2 && mn > BestMin) { BestMin = mn; Best = E; }
-		}
-		if (Best.Num() < 2) continue;
-		// orient A -> B so consecutive arcs chain end-to-end.
-		if (FVector::Dist2D(Best[0], Arms[i].Mid) > FVector::Dist2D(Best.Last(), Arms[i].Mid))
-			for (int x = 0, y = Best.Num() - 1; x < y; ++x, --y) Swap(Best[x], Best[y]);
-		Loop.Append(Best);
-	}
-	if (Loop.Num() < 3) return false;
-
-	// Triangulate the chained outline by ear clipping (handles the concave outline, no hub).
-	TArray<FIntVector> Tris;
-	EarClipPolygon(Loop, Tris);
-	if (Tris.Num() < 1) return false;
-
-	FVector LC = FVector::ZeroVector;
-	for (const FVector& P : Loop) LC += P;
-	LC /= (double)Loop.Num();
-	double RMax = 1.0;
-	for (const FVector& P : Loop) RMax = FMath::Max(RMax, (double)FVector::Dist2D(P, LC));
-
-	const int32 Mat = (int32)ERoadMeshMaterialSlot::Asphalt;
-	const int N = Loop.Num();
-	OutBuffers.Vertices.Reserve(N);
-	OutBuffers.Normals.Reserve(N);
-	OutBuffers.UV0.Reserve(N);
-	OutBuffers.Triangles.Reserve(Tris.Num());
-	OutBuffers.TriGroupIDs.Reserve(Tris.Num());
-	for (const FVector& P : Loop)
-	{
-		OutBuffers.Vertices.Add(P);
-		OutBuffers.Normals.Add(FVector::UpVector);
-		OutBuffers.UV0.Add(FVector2D(0.5f + 0.5f * (float)((P.X - LC.X) / RMax), 0.5f + 0.5f * (float)((P.Y - LC.Y) / RMax)));
-	}
-	for (const FIntVector& T : Tris)
-	{
-		OutBuffers.Triangles.Add(T);
-		OutBuffers.TriGroupIDs.Add(Mat);
-	}
-
-	OrientTrianglesUp(OutBuffers);
-
-	if (OutBuffers.Triangles.Num() < 1) return false;
-
-	OutMaterialID = Mat;
-	return true;
 }
 
 void FRoadMeshGenerator::GenerateRoadMesh(UWorld* World)
@@ -769,8 +139,8 @@ void FRoadMeshGenerator::GenerateRoadMesh(UWorld* World)
 		return;
 	}
 
-	const size_t NumRoads = Odr->GetNumOfRoads();
-	if (NumRoads == 0)
+	const int32 NumRoads = (int32)Odr->GetNumOfRoads();
+	if (NumRoads <= 0)
 	{
 		UE_LOG(LogOpenDriveRoadMesh, Warning, TEXT("GenerateRoadMesh: no roads"));
 		return;
@@ -813,8 +183,9 @@ void FRoadMeshGenerator::GenerateRoadMesh(UWorld* World)
 			if (Hits > 0) break;
 		}
 	}
-	// Always present 5 slots even if all nullptr (so baked StaticMesh gets explicit slot count).
-	while (Mats.Num() < 5) Mats.Add(nullptr);
+	// Always present 6 slots even if all nullptr (so the baked StaticMesh gets an explicit slot count).
+	const int32 NumSlots = (int32)ERoadMeshMaterialSlot::Deck + 1;
+	while (Mats.Num() < NumSlots) Mats.Add(nullptr);
 	Actor->DefaultMaterials = Mats;
 	Actor->ApplyDefaultMaterials();
 
@@ -826,18 +197,65 @@ void FRoadMeshGenerator::GenerateRoadMesh(UWorld* World)
 	}
 	Mesh->Reset();
 
+	// Cached sampling/elevation params.
+	const double MaxStep    = FMath::Max((double)Settings.MaxStepMeters, 0.05);
+	const double MinStep    = FMath::Max((double)Settings.MinStepMeters, 0.01);
+	const double ZOff       = Settings.ZOffsetCm;
+	const double MarkOff    = Settings.MarkingZOffsetCm;
+	const double CurbHeight = FMath::Max((double)Settings.CurbHeightCm, 0.0);
+
+	// Append a buffer into the single road mesh with a material slot id, deferring change
+	// notifications until NotifyMeshUpdated() at the end. Reports the appended tri/vert counts.
+	auto AppendBuf = [&Mesh](FGeometryScriptSimpleMeshBuffers& Buf, int32 MaterialID, int32& OutTri, int32& OutVert)
+	{
+		OutTri = Buf.Triangles.Num();
+		OutVert = Buf.Vertices.Num();
+		FGeometryScriptIndexList NewTris;
+		UGeometryScriptLibrary_MeshBasicEditFunctions::AppendBuffersToMesh(
+			Mesh, Buf, NewTris, MaterialID, /*bDeferChangeNotifications=*/true, nullptr);
+	};
+
+	int32 RoadsProcessed = 0;
+	int32 LanesEmitted = 0;
+	int32 RisersEmitted = 0;
+	int32 TotalMarkTri = 0;
+	int32 JunctionFills = 0;
 	int32 TotalTri = 0;
 	int32 TotalVert = 0;
-	int32 TotalMarkTri = 0;
-	TSet<int32> UsedMaterialIDs;
-	int32 LanesEmitted = 0;
-	int32 RoadsProcessed = 0;
 
-	for (int32 r = 0; r < (int32)NumRoads; ++r)
+	// (1) Junction fills (pre-pass): triangulate every junction BEFORE the lane loop so we know
+	// which junctions actually produced a closed fill patch. The lane loop then skips only the
+	// connecting-road driving lanes of *filled* junctions (the patch replaces them). Junctions
+	// whose fill fails keep their connecting-road lanes rendered individually below (no holes).
+	TSet<int32> FilledJunctionIds;
+	if (Settings.bGenerateJunctionPatches)
 	{
-		roadmanager::Road* Road = Odr->GetRoadByIdx(r);
+		const int32 NumJunctions = (int32)Odr->GetNumOfJunctions();
+		for (int32 ji = 0; ji < NumJunctions; ++ji)
+		{
+			roadmanager::Junction* J = Odr->GetJunctionByIdx(ji);
+			if (!J) continue;
+			FGeometryScriptSimpleMeshBuffers Buf;
+			if (OpenDRIVEMesh::BuildJunctionFillBuffers(J, ZOff, Buf))
+			{
+				int32 Tri = 0, Vert = 0;
+				AppendBuf(Buf, (int32)OpenDRIVEMesh::ERoadMatSlot::Asphalt, Tri, Vert);
+				TotalTri += Tri;
+				TotalVert += Vert;
+				++JunctionFills;
+				FilledJunctionIds.Add(J->GetId());
+			}
+		}
+	}
+
+	// (2) Main lane loop: per-lane surface strips + raised-curb risers + road marks.
+	for (int32 ri = 0; ri < NumRoads; ++ri)
+	{
+		roadmanager::Road* Road = Odr->GetRoadByIdx(ri);
 		if (!Road) continue;
-		RoadsProcessed++;
+		++RoadsProcessed;
+
+		const bool bConnecting = OpenDRIVEMesh::IsConnectingRoad(Road);
 
 		const int32 NumSections = Road->GetNumberOfLaneSections();
 		for (int32 ls = 0; ls < NumSections; ++ls)
@@ -846,117 +264,314 @@ void FRoadMeshGenerator::GenerateRoadMesh(UWorld* World)
 			if (!Sec) continue;
 
 			const double SectionStartS = Sec->GetS();
-			const TArray<double> SList = BuildSList(Road, Sec, SectionStartS);
+			const TArray<double> SList = OpenDRIVEMesh::BuildSList(Road, Sec, SectionStartS, MaxStep, MinStep);
 			if (SList.Num() < 2) continue;
 
-			const bool bConnecting = IsConnectingRoad(Road);
-
-			for (int32 li = 0; li < Sec->GetNumberOfLanes(); ++li)
+			const int32 NumLanes = Sec->GetNumberOfLanes();
+			for (int32 li = 0; li < NumLanes; ++li)
 			{
 				roadmanager::Lane* L = Sec->GetLaneByIdx(li);
 				if (!L) continue;
 				const int32 Lid = L->GetId();
+				const roadmanager::Lane::LaneType LT = L->GetLaneType();
 
-				// Skip Driving lanes on connecting roads — the junction fill below
-				// replaces them with one continuous patch. Other lane types (sidewalk,
-				// biking, shoulder, ...) on connecting roads are still emitted so they
-				// sit beside the fill.
-				if (bConnecting && Settings.bGenerateJunctionPatches
-					&& IsDrivingLane((int32)L->GetLaneType()))
+				// Driving lanes of connecting roads are replaced by the junction fill patch — skip
+				// the whole lane (strip + marks) to avoid overlap, but ONLY when that junction
+				// actually got a fill. Unfilled junctions fall through and render their lanes here.
+				if (bConnecting && Settings.bGenerateJunctionPatches && OpenDRIVEMesh::IsDrivingLane((int32)LT)
+					&& FilledJunctionIds.Contains(Road->GetJunction()))
 				{
 					continue;
 				}
 
-				// Surface strip: skip the reference line (zero width).
-				if (Lid != 0)
+				// Surface strip: skip the reference line (zero width) and NONE lanes.
+				if (Lid != 0 && LT != roadmanager::Lane::LANE_TYPE_NONE)
 				{
-					FGeometryScriptSimpleMeshBuffers Buf;
-					int32 Mat = 0;
-					if (BuildLaneStripBuffers(Road, Sec, L, SList, Buf, Mat))
+					const bool bDriving = OpenDRIVEMesh::IsDrivingLane((int32)LT);
+					if (bDriving || Settings.bGenerateNonDrivingLanes)
 					{
-						const int32 TriBefore = Buf.Triangles.Num();
-						const int32 VertBefore = Buf.Vertices.Num();
+						const int32 Slot = OpenDRIVEMesh::SlotForLaneType((int32)LT);
+						const double TopZ = OpenDRIVEMesh::CurbTopZAddCm(L, CurbHeight);
 
-						FGeometryScriptIndexList NewTris;
-						UGeometryScriptLibrary_MeshBasicEditFunctions::AppendBuffersToMesh(
-							Mesh, Buf, NewTris, Mat, /*bDeferChangeNotifications=*/true, nullptr);
+						FGeometryScriptSimpleMeshBuffers Buf;
+						if (OpenDRIVEMesh::BuildLaneSurfaceStripBuffers(Road, Sec, L, SList, ZOff, TopZ, Buf))
+						{
+							int32 Tri = 0, Vert = 0;
+							AppendBuf(Buf, Slot, Tri, Vert);
+							TotalTri += Tri;
+							TotalVert += Vert;
+							++LanesEmitted;
 
-						TotalTri += TriBefore;
-						TotalVert += VertBefore;
-						UsedMaterialIDs.Add(Mat);
-						LanesEmitted++;
+							// Raised-curb riser: close the vertical step at this lane's inner edge
+							// when its top elevation differs from the inner neighbour's.
+							const int32 InnerId = (Lid > 0) ? (Lid - 1) : (Lid + 1);
+							roadmanager::Lane* InnerLane = Sec->GetLaneById(InnerId);
+							const double Tin = OpenDRIVEMesh::CurbTopZAddCm(InnerLane, CurbHeight);
+							if (FMath::Abs(TopZ - Tin) > 1e-3)
+							{
+								FGeometryScriptSimpleMeshBuffers RiserBuf;
+								if (OpenDRIVEMesh::BuildCurbRiserBuffers(Road, Sec, L, SList, ZOff, Tin, TopZ, RiserBuf))
+								{
+									int32 RTri = 0, RVert = 0;
+									AppendBuf(RiserBuf, (int32)OpenDRIVEMesh::ERoadMatSlot::Border, RTri, RVert);
+									TotalTri += RTri;
+									TotalVert += RVert;
+									++RisersEmitted;
+								}
+							}
+						}
 					}
 				}
 
-				// Road marks: also process for lane 0 — that's where the centerline mark lives.
+				// Road marks (centerline lane 0 included).
 				if (Settings.bGenerateMarkings)
 				{
 					int32 MarkTris = 0;
-					AppendRoadMarksForLane(Mesh, Road, Sec, L, SectionStartS, Sec->GetLength(), MarkTris);
-					if (MarkTris > 0)
-					{
-						TotalMarkTri += MarkTris;
-						UsedMaterialIDs.Add((int32)ERoadMeshMaterialSlot::Marking);
-					}
+					OpenDRIVEMesh::AppendRoadMarksForLane(
+						Mesh, Road, Sec, L, SectionStartS, Sec->GetLength(),
+						ZOff, MarkOff, MaxStep, (int32)OpenDRIVEMesh::ERoadMatSlot::Marking, MarkTris);
+					TotalMarkTri += MarkTris;
+					TotalTri += MarkTris;
 				}
 			}
 		}
 	}
 
-	// Junction fills: one continuous asphalt patch per junction, bounded by the
-	// outermost Driving edges of every incoming road at the junction interface.
-	// Driving lanes of the connecting roads inside the junction were skipped above,
-	// so this patch replaces them rather than overlapping.
-	int32 JunctionFillsEmitted = 0;
-	int32 JunctionFillTris = 0;
-	if (Settings.bGenerateJunctionPatches)
+	// (3) Elevated deck structure: turn elevated road spans into a bridge (thick slab + parapets +
+	// piers). Opt-in. The top surface is the lane mesh built above; here we add the underside/fascia,
+	// edge parapets, and support piers down to GroundZCm, skipping any pier on (or near) a road below.
+	int32 DeckSpans = 0, PiersBuilt = 0, PiersSkipped = 0;
+	if (Settings.bGenerateDeckStructure)
 	{
-		const int NumJunctions = Odr->GetNumOfJunctions();
-		for (int ji = 0; ji < NumJunctions; ++ji)
+		const double GroundZ = Settings.GroundZCm;
+		const double ThrCm = Settings.DeckHeightThresholdMeters * 100.0;
+		const int32 DeckSlot = (int32)OpenDRIVEMesh::ERoadMatSlot::Structure;
+
+		auto SurfZAt = [&](roadmanager::Road* R, double s) -> double
 		{
-			roadmanager::Junction* J = Odr->GetJunctionByIdx(ji);
-			if (!J) continue;
+			return OpenDRIVEMesh::EvalLanePoint(R, s, 0.0, ZOff).Z;
+		};
 
-			FGeometryScriptSimpleMeshBuffers Buf;
-			int32 Mat = 0;
-			if (BuildJunctionFillBuffers(J, Buf, Mat))
+		// Full-width XY footprint of every road, with its Z range. Built from the SAME outer-edge
+		// polylines used for the deck so the parapet adjacency probe lines up with where decks meet.
+		struct FRoadFootprint { TArray<FVector2D> Poly; double ZMin; double ZMax; int32 RoadIdx; };
+		TArray<FRoadFootprint> Footprints;
+		for (int32 ri = 0; ri < NumRoads; ++ri)
+		{
+			roadmanager::Road* R = Odr->GetRoadByIdx(ri);
+			if (!R || R->GetLength() <= KINDA_SMALL_NUMBER) continue;
+			const TArray<double> FSList = OpenDRIVEMesh::BuildRoadSListAllSections(R, MaxStep, MinStep);
+			if (FSList.Num() < 2) continue;
+			TArray<FVector> FL, FR;
+			if (!OpenDRIVEMesh::BuildRoadEdgePolylines(R, FSList, ZOff, FL, FR)) continue;
+			FRoadFootprint FP;
+			FP.RoadIdx = ri;
+			FP.ZMin = TNumericLimits<double>::Max();
+			FP.ZMax = -TNumericLimits<double>::Max();
+			FP.Poly.Reserve(FL.Num() + FR.Num());
+			auto AddPt = [&](const FVector& P) { FP.Poly.Add(FVector2D(P.X, P.Y)); FP.ZMin = FMath::Min(FP.ZMin, (double)P.Z); FP.ZMax = FMath::Max(FP.ZMax, (double)P.Z); };
+			for (int32 k = 0; k < FL.Num(); ++k) AddPt(FL[k]);
+			for (int32 k = FR.Num() - 1; k >= 0; --k) AddPt(FR[k]); // close: left fwd + right reversed
+			if (FP.Poly.Num() >= 3) Footprints.Add(MoveTemp(FP));
+		}
+
+		// Drop free-flag runs shorter than this many stations: kills the short interior parapet
+		// stubs left by marginal per-station adjacency tests near merges / span ends.
+		auto CleanShortRuns = [](TArray<bool>& Free, int32 MinRun)
+		{
+			const int32 n = Free.Num();
+			int32 i = 0;
+			while (i < n)
 			{
-				const int32 TriBefore = Buf.Triangles.Num();
-				const int32 VertBefore = Buf.Vertices.Num();
+				if (!Free[i]) { ++i; continue; }
+				int32 j = i;
+				while (j < n && Free[j]) ++j; // [i, j) is a free run
+				if (j - i < MinRun) { for (int32 k = i; k < j; ++k) Free[k] = false; }
+				i = j;
+			}
+		};
+		const double ClearCm = Settings.PierRoadClearanceMeters * 100.0;
+		const double ClearSq = ClearCm * ClearCm;
+		const double GroundBandTop = GroundZ + ThrCm; // footprints staying below this are under-roads
+		const double ParapetProbeCm = 150.0;          // outboard probe distance for a neighbour deck
+		const double ParapetZBandCm = Settings.DeckThicknessCm + 50.0; // only same-level neighbours count
 
-				FGeometryScriptIndexList NewTris;
-				UGeometryScriptLibrary_MeshBasicEditFunctions::AppendBuffersToMesh(
-					Mesh, Buf, NewTris, Mat, /*bDeferChangeNotifications=*/true, nullptr);
+		auto PierBlocked = [&](double X, double Y) -> bool
+		{
+			const FVector2D P(X, Y);
+			for (const FRoadFootprint& FP : Footprints)
+			{
+				if (FP.ZMax > GroundBandTop) continue; // only avoid near-ground (under) roads
+				if (PointInPoly2D(FP.Poly, P)) return true;
+				if (ClearCm > 0.0 && DistToPolyEdgesSq2D(FP.Poly, P) < ClearSq) return true;
+			}
+			return false;
+		};
 
-				TotalTri += TriBefore;
-				TotalVert += VertBefore;
-				JunctionFillTris += TriBefore;
-				JunctionFillsEmitted++;
-				UsedMaterialIDs.Add(Mat);
+		// True when the deck edge point is a free outer edge (open air outboard -> wants a parapet).
+		auto EdgeFree = [&](int32 SelfIdx, const FVector& EdgePt, const FVector& OutwardDir) -> bool
+		{
+			const FVector2D Q(EdgePt.X + OutwardDir.X * ParapetProbeCm, EdgePt.Y + OutwardDir.Y * ParapetProbeCm);
+			for (const FRoadFootprint& FP : Footprints)
+			{
+				if (FP.RoadIdx == SelfIdx) continue;
+				if (EdgePt.Z < FP.ZMin - ParapetZBandCm || EdgePt.Z > FP.ZMax + ParapetZBandCm) continue;
+				if (PointInPoly2D(FP.Poly, Q)) return false; // covered outboard -> interior edge
+			}
+			return true;
+		};
+
+		for (int32 ri = 0; ri < NumRoads; ++ri)
+		{
+			roadmanager::Road* R = Odr->GetRoadByIdx(ri);
+			if (!R) continue;
+			const double Len = R->GetLength();
+			if (Len <= KINDA_SMALL_NUMBER) continue;
+
+			const TArray<double> SList = OpenDRIVEMesh::BuildRoadSListAllSections(R, MaxStep, MinStep);
+			const int32 M = SList.Num();
+			if (M < 2) continue;
+
+			// Walk contiguous on-deck runs (surface above ground+threshold).
+			int32 i = 0;
+			while (i < M)
+			{
+				if (SurfZAt(R, SList[i]) - GroundZ <= ThrCm) { ++i; continue; }
+				int32 j = i;
+				while (j + 1 < M && SurfZAt(R, SList[j + 1]) - GroundZ > ThrCm) ++j;
+				if (j - i + 1 >= 2)
+				{
+					TArray<double> Sub;
+					Sub.Reserve(j - i + 1);
+					for (int32 k = i; k <= j; ++k) Sub.Add(SList[k]);
+
+					TArray<FVector> Left, Right;
+					if (OpenDRIVEMesh::BuildRoadEdgePolylines(R, Sub, ZOff, Left, Right))
+					{
+						++DeckSpans;
+
+						FGeometryScriptSimpleMeshBuffers DeckBuf;
+						OpenDRIVEMesh::BuildDeckBuffers(Left, Right, Settings.DeckThicknessCm, DeckBuf);
+						{ int32 T = 0, V = 0; AppendBuf(DeckBuf, DeckSlot, T, V); TotalTri += T; TotalVert += V; }
+
+						if (Settings.ParapetHeightCm > 0.0)
+						{
+							// Per-station: emit a parapet only where the edge faces open air, not
+							// where another deck abuts (parallel/merging ramps share an interior seam).
+							const int32 NE = FMath::Min(Left.Num(), Right.Num());
+							TArray<bool> LeftFree, RightFree;
+							LeftFree.SetNum(NE); RightFree.SetNum(NE);
+							for (int32 e = 0; e < NE; ++e)
+							{
+								FVector OutL = (Left[e] - Right[e]); OutL.Z = 0; OutL = OutL.GetSafeNormal();
+								FVector OutR = (Right[e] - Left[e]); OutR.Z = 0; OutR = OutR.GetSafeNormal();
+								LeftFree[e]  = EdgeFree(ri, Left[e], OutL);
+								RightFree[e] = EdgeFree(ri, Right[e], OutR);
+							}
+							// Remove isolated short free runs (the stubs at merges / deck ends).
+							CleanShortRuns(LeftFree, 4);
+							CleanShortRuns(RightFree, 4);
+
+							FGeometryScriptSimpleMeshBuffers ParBuf;
+							OpenDRIVEMesh::BuildParapetBuffers(Left, Right, Settings.ParapetHeightCm, Settings.ParapetThicknessCm, LeftFree, RightFree, ParBuf);
+							int32 T = 0, V = 0; AppendBuf(ParBuf, DeckSlot, T, V); TotalTri += T; TotalVert += V;
+						}
+
+						// Support piers at fixed arc-length spacing along the run centerline.
+						const double SpacingCm = FMath::Max((double)Settings.PierSpacingMeters * 100.0, 200.0);
+						double Accum = SpacingCm; // place the first pier ~one spacing in
+						const int32 NN = FMath::Min(Left.Num(), Right.Num());
+						for (int32 k = 1; k < NN; ++k)
+						{
+							const FVector MidPrev = (Left[k - 1] + Right[k - 1]) * 0.5;
+							const FVector MidCur  = (Left[k]     + Right[k])     * 0.5;
+							Accum += FVector::Dist(MidPrev, MidCur);
+							if (Accum < SpacingCm) continue;
+							Accum = 0.0;
+
+							const double DeckUnderZ = MidCur.Z - Settings.DeckThicknessCm;
+							if (DeckUnderZ - GroundZ < 50.0) continue; // too short to be worth a pier
+							if (PierBlocked(MidCur.X, MidCur.Y)) { ++PiersSkipped; continue; }
+
+							FGeometryScriptSimpleMeshBuffers PierBuf;
+							OpenDRIVEMesh::BuildPierBuffers(MidCur.X, MidCur.Y, DeckUnderZ, GroundZ, Settings.PierHalfWidthCm, PierBuf);
+							int32 T = 0, V = 0; AppendBuf(PierBuf, DeckSlot, T, V); TotalTri += T; TotalVert += V;
+							++PiersBuilt;
+						}
+					}
+				}
+				i = j + 1;
 			}
 		}
 	}
 
-	// Normals are supplied per-vertex by each Build*Buffers call and written straight into
-	// the normal overlay by AppendBuffersToMesh. We deliberately do NOT call RecomputeNormals
-	// here: on this assembled mesh it was leaving the overlay effectively unset (the component
-	// then fell back to tangent-derived normals -> flat/grey "hazy" shading). The component's
-	// AutoCalculated tangents are derived from these normals + the UVs.
+	// (4) At-grade road slab: gives every non-elevated road a vertical thickness so the drivable
+	// surface is a real volume instead of a paper-thin ribbon. Reuses BuildDeckBuffers with a
+	// smaller thickness. When the deck structure is also on we partition each road's SList into
+	// at-grade vs on-deck runs and only emit the slab on at-grade runs (no overlap with the deck).
+	int32 SlabSpans = 0;
+	if (Settings.RoadThicknessCm > 0.0)
+	{
+		const double SlabT = Settings.RoadThicknessCm;
+		const int32 SlabSlot = (int32)OpenDRIVEMesh::ERoadMatSlot::Structure;
+		const bool bSkipOnDeck = Settings.bGenerateDeckStructure;
+		const double GroundZ = Settings.GroundZCm;
+		const double ThrCm = Settings.DeckHeightThresholdMeters * 100.0;
 
+		auto SurfZAt = [&](roadmanager::Road* R, double s) -> double
+		{
+			return OpenDRIVEMesh::EvalLanePoint(R, s, 0.0, ZOff).Z;
+		};
+		auto IsOnDeck = [&](roadmanager::Road* R, double s) -> bool
+		{
+			return bSkipOnDeck && (SurfZAt(R, s) - GroundZ > ThrCm);
+		};
+
+		for (int32 ri = 0; ri < NumRoads; ++ri)
+		{
+			roadmanager::Road* R = Odr->GetRoadByIdx(ri);
+			if (!R || R->GetLength() <= KINDA_SMALL_NUMBER) continue;
+			const TArray<double> SList = OpenDRIVEMesh::BuildRoadSListAllSections(R, MaxStep, MinStep);
+			const int32 M = SList.Num();
+			if (M < 2) continue;
+
+			// Walk contiguous at-grade runs (mirrors the on-deck walk above but inverted).
+			int32 i = 0;
+			while (i < M)
+			{
+				if (IsOnDeck(R, SList[i])) { ++i; continue; }
+				int32 j = i;
+				while (j + 1 < M && !IsOnDeck(R, SList[j + 1])) ++j;
+				if (j - i + 1 >= 2)
+				{
+					TArray<double> Sub;
+					Sub.Reserve(j - i + 1);
+					for (int32 k = i; k <= j; ++k) Sub.Add(SList[k]);
+
+					TArray<FVector> Left, Right;
+					if (OpenDRIVEMesh::BuildRoadEdgePolylines(R, Sub, ZOff, Left, Right))
+					{
+						++SlabSpans;
+						FGeometryScriptSimpleMeshBuffers SlabBuf;
+						OpenDRIVEMesh::BuildDeckBuffers(Left, Right, SlabT, SlabBuf);
+						int32 T = 0, V = 0; AppendBuf(SlabBuf, SlabSlot, T, V); TotalTri += T; TotalVert += V;
+					}
+				}
+				i = j + 1;
+			}
+		}
+	}
+
+	// Normals are supplied per-vertex by each Build*Buffers call and written straight into the
+	// normal overlay by AppendBuffersToMesh. We deliberately do NOT call RecomputeNormals here.
 	Actor->MeshComp->NotifyMeshUpdated();
 
 	GeneratedActors.Add(Actor);
 
-	FString MatList;
-	for (int32 M : UsedMaterialIDs)
-	{
-		MatList += FString::Printf(TEXT("%d "), M);
-	}
-
 	LastReport = FString::Printf(
-		TEXT("Roads=%d Lanes=%d Vertices=%d Triangles=%d MarkTris=%d JunctionFills=%d (%d tris) Materials=[%s]"),
-		RoadsProcessed, LanesEmitted, TotalVert, TotalTri, TotalMarkTri,
-		JunctionFillsEmitted, JunctionFillTris, *MatList);
+		TEXT("Roads=%d Lanes=%d Risers=%d MarkTris=%d JunctionFills=%d/%d DeckSpans=%d Piers=%d (skipped=%d) SlabSpans=%d (thk=%.0fcm) Vertices=%d Triangles=%d"),
+		RoadsProcessed, LanesEmitted, RisersEmitted, TotalMarkTri, JunctionFills, (int32)Odr->GetNumOfJunctions(),
+		DeckSpans, PiersBuilt, PiersSkipped, SlabSpans, Settings.RoadThicknessCm, TotalVert, TotalTri);
 	UE_LOG(LogOpenDriveRoadMesh, Log, TEXT("GenerateRoadMesh: %s"), *LastReport);
 }
 

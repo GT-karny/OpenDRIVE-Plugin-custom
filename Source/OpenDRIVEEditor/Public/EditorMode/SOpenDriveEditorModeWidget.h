@@ -277,6 +277,22 @@ private :
 	TArray<TSharedPtr<FString>> _lanePositionFilterOptions;
 	TSharedPtr<SSpinBox<int32>> _specificLaneIndexSpinBox;
 
+	// Road mesh parameters (pushed to the subsystem in GenerateRoadMesh()).
+	TSharedPtr<SCheckBox> _rmGenMarkings;
+	TSharedPtr<SCheckBox> _rmGenJunction;
+	TSharedPtr<SCheckBox> _rmGenNonDriving;
+	TSharedPtr<SSpinBox<float>> _rmCurbHeight;
+	TSharedPtr<SSpinBox<float>> _rmRoadThickness;
+	TSharedPtr<SCheckBox> _rmGenDeck;
+	TSharedPtr<SSpinBox<float>> _rmDeckThreshold;
+	TSharedPtr<SSpinBox<float>> _rmGroundZ;
+	TSharedPtr<SSpinBox<float>> _rmDeckThickness;
+	TSharedPtr<SSpinBox<float>> _rmParapetHeight;
+	TSharedPtr<SSpinBox<float>> _rmParapetThickness;
+	TSharedPtr<SSpinBox<float>> _rmPierSpacing;
+	TSharedPtr<SSpinBox<float>> _rmPierHalfWidth;
+	TSharedPtr<SSpinBox<float>> _rmPierClearance;
+
 	// Signal generation
 	TSharedPtr<SCheckBox> _generateSignalsCheckBox;
 	TSharedPtr<SCheckBox> _flipSignalOrientationCheckBox;

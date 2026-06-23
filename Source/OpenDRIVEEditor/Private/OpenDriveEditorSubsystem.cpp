@@ -233,6 +233,56 @@ void UOpenDriveEditorSubsystem::SetRoadMeshMarkingZOffset(float MarkingZOffsetCm
 	MeshGen.Settings.MarkingZOffsetCm = MarkingZOffsetCm;
 }
 
+void UOpenDriveEditorSubsystem::SetRoadMeshGenerateMarkings(bool bGenerate)
+{
+	MeshGen.Settings.bGenerateMarkings = bGenerate;
+}
+
+void UOpenDriveEditorSubsystem::SetRoadMeshGenerateJunctionPatches(bool bGenerate)
+{
+	MeshGen.Settings.bGenerateJunctionPatches = bGenerate;
+}
+
+void UOpenDriveEditorSubsystem::SetRoadMeshGenerateNonDrivingLanes(bool bGenerate)
+{
+	MeshGen.Settings.bGenerateNonDrivingLanes = bGenerate;
+}
+
+void UOpenDriveEditorSubsystem::SetRoadMeshCurbHeight(float CurbHeightCm)
+{
+	MeshGen.Settings.CurbHeightCm = CurbHeightCm;
+}
+
+void UOpenDriveEditorSubsystem::SetRoadMeshRoadThickness(float RoadThicknessCm)
+{
+	MeshGen.Settings.RoadThicknessCm = RoadThicknessCm;
+}
+
+void UOpenDriveEditorSubsystem::SetRoadMeshGenerateDeckStructure(bool bGenerate)
+{
+	MeshGen.Settings.bGenerateDeckStructure = bGenerate;
+}
+
+void UOpenDriveEditorSubsystem::SetRoadMeshDeckParams(
+	float DeckHeightThresholdMeters,
+	float GroundZCm,
+	float DeckThicknessCm,
+	float ParapetHeightCm,
+	float ParapetThicknessCm,
+	float PierSpacingMeters,
+	float PierHalfWidthCm,
+	float PierRoadClearanceMeters)
+{
+	MeshGen.Settings.DeckHeightThresholdMeters = DeckHeightThresholdMeters;
+	MeshGen.Settings.GroundZCm                 = GroundZCm;
+	MeshGen.Settings.DeckThicknessCm           = DeckThicknessCm;
+	MeshGen.Settings.ParapetHeightCm           = ParapetHeightCm;
+	MeshGen.Settings.ParapetThicknessCm        = ParapetThicknessCm;
+	MeshGen.Settings.PierSpacingMeters         = PierSpacingMeters;
+	MeshGen.Settings.PierHalfWidthCm           = PierHalfWidthCm;
+	MeshGen.Settings.PierRoadClearanceMeters   = PierRoadClearanceMeters;
+}
+
 void UOpenDriveEditorSubsystem::SetRoadMeshMaterials(const TArray<UMaterialInterface*>& Materials)
 {
 	MeshGen.Settings.Materials = Materials;
@@ -293,7 +343,7 @@ UStaticMesh* UOpenDriveEditorSubsystem::BakeRoadMeshToStaticMesh(const FString& 
 	Opt.NewMaterials = Actor->DefaultMaterials;
 	Opt.NewMaterialSlotNames.SetNum(Actor->DefaultMaterials.Num());
 	{
-		static const TCHAR* kSlotNames[] = { TEXT("Asphalt"), TEXT("Sidewalk"), TEXT("Border"), TEXT("Marking"), TEXT("Misc") };
+		static const TCHAR* kSlotNames[] = { TEXT("Asphalt"), TEXT("Sidewalk"), TEXT("Border"), TEXT("Marking"), TEXT("Misc"), TEXT("Deck") };
 		for (int32 i = 0; i < Opt.NewMaterialSlotNames.Num(); ++i)
 		{
 			Opt.NewMaterialSlotNames[i] = (i < UE_ARRAY_COUNT(kSlotNames)) ? FName(kSlotNames[i]) : *FString::Printf(TEXT("Slot_%d"), i);

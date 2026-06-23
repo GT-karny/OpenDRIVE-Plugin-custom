@@ -204,6 +204,59 @@ TSharedRef<SWidget> SOpenDRIVEEditorModeWidget::ConstructRoadTabContent(const FA
 		.IsEnabled(this, &SOpenDRIVEEditorModeWidget::CheckIfInEditorMode)
 		.OnCheckStateChanged(this, &SOpenDRIVEEditorModeWidget::OnCheckStateChanged);
 
+	// --- Road-mesh parameter controls (values pushed to the subsystem in GenerateRoadMesh) ---
+	auto RmFloatRow = [&](const FString& Label, TSharedPtr<SSpinBox<float>>& Spin,
+		float Default, float Min, float Max, const FString& Tip) -> TSharedRef<SWidget>
+	{
+		return SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().FillWidth(0.62f).VAlign(VAlign_Center).Padding(5, 0, 5, 0)
+			[
+				SNew(STextBlock).Text(FText::FromString(Label)).Font(*_fontInfoPtr)
+					.ToolTipText(FText::FromString(Tip))
+			]
+			+ SHorizontalBox::Slot().FillWidth(0.38f).VAlign(VAlign_Center)
+			[
+				SAssignNew(Spin, SSpinBox<float>).MinValue(Min).MaxValue(Max).Value(Default)
+					.IsEnabled(this, &SOpenDRIVEEditorModeWidget::CheckIfInEditorMode)
+			];
+	};
+	auto RmCheckRow = [&](const FString& Label, TSharedPtr<SCheckBox>& Check,
+		bool bDefault, const FString& Tip) -> TSharedRef<SWidget>
+	{
+		return SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().FillWidth(0.62f).VAlign(VAlign_Center).Padding(5, 0, 5, 0)
+			[
+				SNew(STextBlock).Text(FText::FromString(Label)).Font(*_fontInfoPtr)
+					.ToolTipText(FText::FromString(Tip))
+			]
+			+ SHorizontalBox::Slot().FillWidth(0.38f).VAlign(VAlign_Center)
+			[
+				SAssignNew(Check, SCheckBox)
+					.IsChecked(bDefault ? ECheckBoxState::Checked : ECheckBoxState::Unchecked)
+					.IsEnabled(this, &SOpenDRIVEEditorModeWidget::CheckIfInEditorMode)
+			];
+	};
+	auto RmAdd = [](const TSharedRef<SVerticalBox>& Box, const TSharedRef<SWidget>& Row)
+	{
+		Box->AddSlot().AutoHeight().Padding(0.f, 3.f, 0.f, 0.f)[ Row ];
+	};
+
+	TSharedRef<SVerticalBox> RoadMeshParams = SNew(SVerticalBox);
+	RmAdd(RoadMeshParams, RmCheckRow(TEXT("Markings"),          _rmGenMarkings,   true,  TEXT("Generate lane-boundary / centerline markings.")));
+	RmAdd(RoadMeshParams, RmCheckRow(TEXT("Junction fill"),     _rmGenJunction,   true,  TEXT("Fill junction interiors with one asphalt patch.")));
+	RmAdd(RoadMeshParams, RmCheckRow(TEXT("Non-driving lanes"), _rmGenNonDriving, true,  TEXT("Generate sidewalk / border / shoulder lane surfaces.")));
+	RmAdd(RoadMeshParams, RmFloatRow(TEXT("Curb height (cm)"),  _rmCurbHeight,    15.f, 0.f, 40.f,  TEXT("Raised sidewalk/curb step height. 0 = flat.")));
+	RmAdd(RoadMeshParams, RmFloatRow(TEXT("Road slab (cm)"),    _rmRoadThickness, 50.f, 0.f, 200.f, TEXT("At-grade road vertical thickness. 0 = thin ribbon.")));
+	RmAdd(RoadMeshParams, RmCheckRow(TEXT("Overpass deck"),     _rmGenDeck,       false, TEXT("Build slab + parapets + piers on elevated spans.")));
+	RmAdd(RoadMeshParams, RmFloatRow(TEXT("  Deck threshold (m)"),    _rmDeckThreshold,    2.f,  0.5f, 10.f,     TEXT("Surface height above ground to count as on-deck.")));
+	RmAdd(RoadMeshParams, RmFloatRow(TEXT("  Ground Z (cm)"),         _rmGroundZ,          0.f,  -100000.f, 100000.f, TEXT("Ground reference Z; piers descend to here.")));
+	RmAdd(RoadMeshParams, RmFloatRow(TEXT("  Deck thickness (cm)"),   _rmDeckThickness,    80.f, 1.f,  200.f,    TEXT("Deck slab thickness below the road surface.")));
+	RmAdd(RoadMeshParams, RmFloatRow(TEXT("  Parapet height (cm)"),   _rmParapetHeight,    90.f, 0.f,  200.f,    TEXT("Edge barrier height. 0 = none.")));
+	RmAdd(RoadMeshParams, RmFloatRow(TEXT("  Parapet thickness (cm)"),_rmParapetThickness, 25.f, 1.f,  60.f,     TEXT("Edge barrier thickness toward road centre.")));
+	RmAdd(RoadMeshParams, RmFloatRow(TEXT("  Pier spacing (m)"),      _rmPierSpacing,      30.f, 2.f,  80.f,     TEXT("Longitudinal distance between support piers.")));
+	RmAdd(RoadMeshParams, RmFloatRow(TEXT("  Pier half-width (cm)"),  _rmPierHalfWidth,    90.f, 10.f, 300.f,    TEXT("Pier box half-extent.")));
+	RmAdd(RoadMeshParams, RmFloatRow(TEXT("  Pier clearance (m)"),    _rmPierClearance,    3.f,  0.f,  10.f,     TEXT("Skip piers within this distance of a road below.")));
+
 	return SNew(SVerticalBox)
 		// Buttons: Reset | Generate
 		+ SVerticalBox::Slot().AutoHeight().Padding(5.f, 5.f, 5.f, 0.f)
@@ -261,6 +314,11 @@ TSharedRef<SWidget> SOpenDRIVEEditorModeWidget::ConstructRoadTabContent(const FA
 					"Generates a DynamicMesh road surface (asphalt / sidewalk / markings, plus a "
 					"filled patch per junction) from the loaded OpenDRIVE. Separate from the lane "
 					"preview above.")))
+		]
+		// Road mesh parameters (curb / slab / overpass deck)
+		+ SVerticalBox::Slot().AutoHeight().Padding(5.f, 5.f, 5.f, 0.f)
+		[
+			RoadMeshParams
 		]
 		+ SVerticalBox::Slot().AutoHeight().Padding(5.f, 2.f, 5.f, 10.f)
 		[
@@ -665,6 +723,23 @@ FReply SOpenDRIVEEditorModeWidget::GenerateRoadMesh()
 	{
 		Notify(TEXT("OpenDriveEditorSubsystem unavailable."), false);
 		return FReply::Handled();
+	}
+
+	// Push the current panel parameter values into the generator before building.
+	if (_rmGenMarkings.IsValid())    SS->SetRoadMeshGenerateMarkings(_rmGenMarkings->IsChecked());
+	if (_rmGenJunction.IsValid())    SS->SetRoadMeshGenerateJunctionPatches(_rmGenJunction->IsChecked());
+	if (_rmGenNonDriving.IsValid())  SS->SetRoadMeshGenerateNonDrivingLanes(_rmGenNonDriving->IsChecked());
+	if (_rmCurbHeight.IsValid())     SS->SetRoadMeshCurbHeight(_rmCurbHeight->GetValue());
+	if (_rmRoadThickness.IsValid())  SS->SetRoadMeshRoadThickness(_rmRoadThickness->GetValue());
+	if (_rmGenDeck.IsValid())        SS->SetRoadMeshGenerateDeckStructure(_rmGenDeck->IsChecked());
+	if (_rmDeckThreshold.IsValid() && _rmGroundZ.IsValid() && _rmDeckThickness.IsValid()
+		&& _rmParapetHeight.IsValid() && _rmParapetThickness.IsValid() && _rmPierSpacing.IsValid()
+		&& _rmPierHalfWidth.IsValid() && _rmPierClearance.IsValid())
+	{
+		SS->SetRoadMeshDeckParams(
+			_rmDeckThreshold->GetValue(), _rmGroundZ->GetValue(), _rmDeckThickness->GetValue(),
+			_rmParapetHeight->GetValue(), _rmParapetThickness->GetValue(), _rmPierSpacing->GetValue(),
+			_rmPierHalfWidth->GetValue(), _rmPierClearance->GetValue());
 	}
 
 	// GenerateRoadMesh returns a 1-line report; surface it so the user sees tri/junction counts.
